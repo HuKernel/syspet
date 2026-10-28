@@ -3,3 +3,7 @@ __pycache__/
 *.log.*
 syspet.json
 test_dir/
+build/
+dist/
+*.spec
+.buildenv/

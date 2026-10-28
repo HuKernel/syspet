@@ -14,11 +14,15 @@ import win32crypt
 import win32file
 
 log = logging.getLogger('syspet')
-__version__ = '1.1.2'
+__version__ = '1.2.0'
+# PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
+BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
 
 
 def autostart_cmd():
+    if getattr(sys, 'frozen', False):
+        return f'"{sys.executable}"'
     pyw = Path(sys.executable).with_name('pythonw.exe')
     return f'"{pyw}" "{Path(sys.argv[0]).resolve()}"'
 
@@ -48,7 +52,7 @@ def set_autostart(on):
 
 def setup_log():
     """滚动文件日志：单文件 1MB × 保留 2 个备份，总量恒定约 3MB"""
-    h = RotatingFileHandler(Path(__file__).with_suffix('.log'), maxBytes=1_000_000,
+    h = RotatingFileHandler(BASE.with_suffix('.log'), maxBytes=1_000_000,
                             backupCount=2, encoding='utf-8')
     h.setFormatter(logging.Formatter(
         '%(asctime)s [%(levelname)s] %(threadName)s %(message)s'))
@@ -138,7 +142,7 @@ def gpu_probe():
         return None, None
 
 
-CFG_AI = Path(__file__).with_suffix('.json')
+CFG_AI = BASE.with_suffix('.json')
 _excludes, _only = NOISE, ()
 
 

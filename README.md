@@ -22,7 +22,9 @@ Windows 桌面常驻小工具：无边框置顶半透明悬浮窗，实时显示
 
 ## 启动
 
-双击 `启动.bat`，或 `python syspet.py`。依赖：`pip install -r requirements.txt`（anaconda 已自带）。启动器需 `pythonw` 在 PATH，否则请改为本机 Python 绝对路径。
+- **普通用户**：从 [Releases](https://github.com/HuKernel/syspet/releases) 下载 `syspet.exe`，双击即用（单文件绿色版，无需安装 Python；配置 `syspet.json` 与日志自动生成在 exe 同目录）
+- **开发者**：`python syspet.py` 或双击 `启动.bat`（需 pythonw，依赖：`pip install -r requirements.txt`）
+- 重新打包 exe：`pyinstaller --onefile --noconsole --name syspet syspet.py`
 
 ## 交互
 
