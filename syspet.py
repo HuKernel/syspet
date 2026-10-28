@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.5.0'
+__version__ = '1.5.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -405,14 +405,16 @@ def fetch_one(p):
 
 
 def ai_net_loop(state):
-    """监测配置文件变化（≤5 秒）即重查全部供应商；数据版本号驱动 UI 重绘"""
-    mtime = None
+    """供应商用量定时查询（默认 60s 一轮，配置变化 ≤5s 热生效）；
+    数据版本号驱动 UI 重绘。秒级轮询易触发平台限流，勿调太低"""
+    mtime, next_poll = None, 0.0
     while True:
         try:
             m = CFG_AI.stat().st_mtime
         except OSError:
             m = None
-        if m != mtime:
+        now = time.time()
+        if m != mtime or now >= next_poll:
             mtime = m
             load_excludes()  # 排除规则与供应商配置同文件，一并热加载
             try:
@@ -423,6 +425,7 @@ def ai_net_loop(state):
                              for p in provs_plain(provs)[:3]]
             state['ver'] += 1
             log.info('AI 余额: %s', state['rows'])
+            next_poll = time.time() + 60
         time.sleep(5)
 
 
