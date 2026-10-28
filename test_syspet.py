@@ -1,8 +1,9 @@
 import os
+import json
 from pathlib import Path
 import syspet
 from syspet import (handle_batch, ev_text, size, rr, split_ext, clip_path,
-                    push_event, enc, dec, _user_dirs)
+                    push_event, enc, dec, _user_dirs, upgrade_keys)
 
 syspet._only, syspet._excludes = (), syspet.NOISE  # 隔离本机 syspet.json，固定过滤规则
 
@@ -20,6 +21,24 @@ _e = enc('sk-abc密钥123')
 assert _e != 'sk-abc密钥123' and _e.startswith('dpapi:') and dec(_e) == 'sk-abc密钥123'
 assert dec('sk-旧明文兼容') == 'sk-旧明文兼容'
 assert enc('') == '' and dec('') == ''
+
+# 明文密钥启动自动升级：密文化且其他配置键（only）原样保留
+_up = Path('test_upgrade.json')
+syspet.CFG_AI = _up
+try:
+    _up.write_text(json.dumps({'providers': [{'name': 't', 'url': 'https://x',
+                                              'key': 'sk-明文', 'token': 'tok'}],
+                               'only': ['d:\\x']}), 'utf-8')
+    upgrade_keys()
+    _c = json.loads(_up.read_text('utf-8'))
+    assert _c['providers'][0]['key'].startswith('dpapi:') and dec(_c['providers'][0]['key']) == 'sk-明文'
+    assert _c['providers'][0]['token'].startswith('dpapi:')
+    assert _c['only'] == ['d:\\x']
+    upgrade_keys()  # 已是密文则不再写盘
+    assert json.loads(_up.read_text('utf-8')) == _c
+finally:
+    _up.unlink()
+    syspet.CFG_AI = syspet.BASE.with_suffix('.json')
 
 # 系统噪音过滤：Windows/ProgramData/Temp 等被排除，普通文件放行
 _ev = []

@@ -14,7 +14,7 @@ import win32crypt
 import win32file
 
 log = logging.getLogger('syspet')
-__version__ = '1.2.1'
+__version__ = '1.2.2'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -206,6 +206,26 @@ def provs_plain(provs):
             if p.get(k):
                 p[k] = dec(p[k])
     return provs
+
+
+def upgrade_keys():
+    """旧版明文 key/令牌启动时自动升级为 DPAPI 密文，明文不再留存"""
+    try:
+        cfg = json.loads(CFG_AI.read_text('utf-8'))
+    except (OSError, ValueError):
+        return
+    changed = False
+    for p in cfg.get('providers', []):
+        for k in ('key', 'token'):
+            if p.get(k) and not p[k].startswith('dpapi:'):
+                p[k] = enc(p[k])
+                changed = True
+    if changed:
+        CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
+        log.info('检测到明文密钥，已自动升级为 DPAPI 密文')
+
+
+upgrade_keys()
 
 
 def test_provider(url, key, token=''):
