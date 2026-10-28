@@ -14,7 +14,7 @@ import win32crypt
 import win32file
 
 log = logging.getLogger('syspet')
-__version__ = '1.2.3'
+__version__ = '1.3.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -542,50 +542,78 @@ def ev_text(ev):
 
 
 class AICfg(tk.Toplevel):
-    """AI 供应商配置窗口：列表 + 表单 + 测试连接，保存写 syspet.json"""
+    """AI 供应商配置窗口：亮色现代风（独立于主悬浮窗的深色桌宠主题），保存写 syspet.json"""
+    WBG, WFG, DIM, LINE, ACC = '#f8fafc', '#1e293b', '#64748b', '#e2e8f0', '#2563eb'
+
     def __init__(self, master):
         super().__init__(master)
         self.title('AI 供应商配置')
-        self.configure(bg=BG)
+        self.configure(bg=self.WBG)
         try:
             self.provs = provs_plain(json.loads(CFG_AI.read_text('utf-8'))
                                      .get('providers', []))
         except (OSError, ValueError):
             self.provs = []
         self.sel = None
-        f = ('Consolas', 10)
+        F = 'Microsoft YaHei UI'
 
-        self.lb = tk.Listbox(self, bg=BG, fg=FG, font=f, bd=0, width=48, height=5,
-                             highlightthickness=0, selectbackground='#45475a',
+        top = tk.Frame(self, bg=self.WBG)
+        top.pack(fill='x', padx=20, pady=(16, 10))
+        tk.Label(top, text='AI 供应商', bg=self.WBG, fg=self.WFG,
+                 font=(F, 13, 'bold')).pack(anchor='w')
+        tk.Label(top, text='添加并管理你的 AI 平台密钥，保存后自动生效', bg=self.WBG,
+                 fg=self.DIM, font=(F, 9)).pack(anchor='w', pady=(2, 0))
+
+        c1 = self._card()
+        self.lb = tk.Listbox(c1, bg='#ffffff', fg=self.WFG, bd=0, width=48, height=4,
+                             font=(F, 10), highlightthickness=1,
+                             highlightbackground=self.LINE, highlightcolor=self.ACC,
+                             selectbackground='#dbeafe', selectforeground='#1e40af',
                              activestyle='none', exportselection=False)
-        self.lb.grid(row=0, column=0, columnspan=4, padx=10, pady=(10, 4), sticky='we')
+        self.lb.pack(fill='x', padx=12, pady=(12, 6))
         self.lb.bind('<<ListboxSelect>>', self._pick)
-        btn = dict(bg='#313244', fg=FG, bd=0, activebackground='#45475a',
-                   activeforeground=FG, font=('Microsoft YaHei UI', 9), padx=8)
-        tk.Button(self, text='新增', command=self._add, **btn
-                  ).grid(row=1, column=0, padx=(10, 4), pady=2, sticky='w')
-        tk.Button(self, text='删除', command=self._del, **btn
-                  ).grid(row=1, column=1, pady=2, sticky='w')
-        self.btn_test = tk.Button(self, text='测试连接', command=self._test, **btn)
-        self.btn_test.grid(row=1, column=3, padx=4, pady=2, sticky='w')
+        btn2 = dict(bg='#ffffff', fg='#475569', activebackground='#f1f5f9',
+                    activeforeground=self.WFG, font=(F, 9), bd=0, padx=14, pady=4,
+                    cursor='hand2', highlightthickness=1, highlightbackground='#cbd5e1')
+        brow = tk.Frame(c1, bg='#ffffff')
+        brow.pack(fill='x', padx=12, pady=(0, 12))
+        tk.Button(brow, text='＋ 新增', command=self._add, **btn2).pack(side='left')
+        tk.Button(brow, text='删除', command=self._del, **btn2).pack(side='left', padx=(8, 0))
 
-        self.e_name, self.e_url = self._field('名称', 2, f), self._field('地址', 3, f)
-        self.e_key = self._field('Key', 4, f, secret=True)      # 凭据类输入框 ● 遮罩
-        self.e_token = self._field('令牌*', 5, f, secret=True)
-        self.e_uid = self._field('UID*', 6, f)
-        self.status = tk.Label(self, bg=BG, fg=DIM, font=('Microsoft YaHei UI', 9),
-                               anchor='w', text='*可选：控制台"系统访问令牌+用户ID"，填了显示账号余额')
-        self.status.grid(row=7, column=0, columnspan=4, padx=10, sticky='we')
-        tk.Button(self, text='保存并关闭', command=self._save, **btn
-                  ).grid(row=8, column=0, columnspan=4, padx=10, pady=(4, 10), sticky='w')
+        c2 = self._card()
+        self.e_name = self._field(c2, '名称', F)
+        self.e_url = self._field(c2, '地址', F)
+        self.e_key = self._field(c2, 'Key', F, secret=True)          # 凭据框 ● 遮罩
+        self.e_token = self._field(c2, '访问令牌（可选）', F, secret=True)
+        self.e_uid = self._field(c2, '用户 UID（可选，需与令牌同时填）', F)
+        self.btn_test = tk.Button(c2, text='测试连接', command=self._test, **btn2)
+        self.btn_test.pack(anchor='w', padx=12, pady=(10, 12))
+
+        bot = tk.Frame(self, bg=self.WBG)
+        bot.pack(fill='x', padx=20, pady=(6, 16))
+        self.status = tk.Label(bot, bg=self.WBG, fg=self.DIM, font=(F, 9), anchor='w',
+                               text='密钥经 Windows DPAPI 加密存储，仅本机当前用户可解')
+        self.status.pack(side='left', fill='x', expand=True)
+        tk.Button(bot, text='保存并关闭', command=self._save, bg=self.ACC, fg='#ffffff',
+                  activebackground='#1d4ed8', activeforeground='#ffffff',
+                  font=(F, 10, 'bold'), bd=0, padx=18, pady=5,
+                  cursor='hand2').pack(side='right')
         self._refresh()
 
-    def _field(self, label, row, f, secret=False):
-        tk.Label(self, text=label, bg=BG, fg=DIM, font=f
-                 ).grid(row=row, column=0, padx=(10, 4), pady=2, sticky='w')
-        e = tk.Entry(self, bg='#313244', fg=FG, bd=0, width=42, font=f,
-                     insertbackground=FG, show='●' if secret else '')
-        e.grid(row=row, column=1, columnspan=3, padx=(0, 10), pady=2, sticky='we')
+    def _card(self):
+        c = tk.Frame(self, bg='#ffffff', highlightthickness=1,
+                     highlightbackground=self.LINE)
+        c.pack(fill='x', padx=20, pady=4)
+        return c
+
+    def _field(self, parent, label, f, secret=False):
+        tk.Label(parent, text=label, bg='#ffffff', fg=self.DIM, font=(f, 9)
+                 ).pack(anchor='w', padx=12, pady=(10, 2))
+        e = tk.Entry(parent, bg='#ffffff', fg=self.WFG, bd=0, width=44, font=(f, 10),
+                     insertbackground=self.WFG, show='●' if secret else '',
+                     highlightthickness=1, highlightbackground=self.LINE,
+                     highlightcolor=self.ACC)  # 聚焦时边框变蓝
+        e.pack(fill='x', padx=12)
         return e
 
     def _refresh(self):
@@ -649,7 +677,7 @@ class AICfg(tk.Toplevel):
             else:
                 r = test_provider(url, key, tok)
             self.after(0, lambda: (self.status.config(
-                text=r, fg='#a6e3a1' if r.startswith(('连接', '余')) else '#f38ba8'),
+                text=r, fg='#16a34a' if r.startswith(('连接', '余')) else '#dc2626'),
                 self.btn_test.config(state='normal')))
         threading.Thread(target=run, daemon=True).start()
 
@@ -658,11 +686,11 @@ class AICfg(tk.Toplevel):
         for p in self.provs:
             if not (p['name'] and p['url'].startswith('http') and p['key']):
                 self.status.config(text='有条目未填全（名称 / 地址需 http 开头 / Key）',
-                                   fg='#f38ba8')
+                                   fg='#dc2626')
                 return
             if bool(p.get('token')) != bool(p.get('uid')):
-                self.status.config(text='「令牌」与「UID」需同时填写（或都留空）',
-                                   fg='#f38ba8')
+                self.status.config(text='「访问令牌」与「用户 UID」需同时填写（或都留空）',
+                                   fg='#dc2626')
                 return
         try:
             cfg = json.loads(CFG_AI.read_text('utf-8'))
