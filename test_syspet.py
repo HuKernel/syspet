@@ -26,13 +26,14 @@ assert _ev == [], _ev
 push_event(_ev, '12:00:00', '修改', 'E:\\桌面\\报告.docx', 1, 2, 'E:\\桌面\\报告.docx')
 assert len(_ev) == 1
 
-# 回归：白名单模式内黑名单仍须生效——syspet.log 在白名单目录内曾致
-# "写日志→触发监控事件→再写日志"的自激励循环，事件列表与日志双膨胀
+# 回归：白名单模式内排除规则仍生效——syspet.log 在白名单目录内曾致
+# "写日志→触发监控事件→再写日志"的自激励循环；且任意 .log 一律不监控
 syspet._only = ('e:\\桌面\\',)
 _ev2 = []
 push_event(_ev2, '12:00:00', '修改', 'syspet.log', 1, 2, 'E:\\桌面\\syspet\\syspet.log')
+push_event(_ev2, '12:00:00', '修改', 'app.log', 1, 2, 'E:\\桌面\\app.log')
 push_event(_ev2, '12:00:00', '修改', 'a.txt', 1, 2, 'E:\\桌面\\a.txt')
-assert _ev2 and _ev2[0][2] == 'a.txt', _ev2
+assert len(_ev2) == 1 and _ev2[0][2] == 'a.txt', _ev2
 syspet._only = ()
 long_p = 'C:\\' + 'x' * 80 + '\\file.txt'
 assert clip_path(long_p).endswith('file.txt') and clip_path(long_p).startswith('C:\\')
@@ -48,7 +49,7 @@ handle_batch([(1, 'a.txt'), (3, 'a.txt')], drive, ev, cache, pending)   # 新增
 (d / 'a.txt').write_text('22')
 handle_batch([(3, 'a.txt')], drive, ev, cache, pending)                  # 修改（相邻合并）
 (d / 'a.txt').rename(d / 'b.txt')
-handle_batch([(4, 'a.txt'), (3, '其他.log'), (5, 'b.txt')],              # 改名中间被隔开
+handle_batch([(4, 'a.txt'), (3, '其他.tmp'), (5, 'b.txt')],              # 改名中间被隔开
              drive, ev, cache, pending)
 (d / 'b.txt').rename(d / 'c.txt')
 handle_batch([(4, 'b.txt')], drive, ev, cache, pending)                  # 改名旧名先到

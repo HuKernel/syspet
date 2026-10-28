@@ -14,7 +14,7 @@ import win32crypt
 import win32file
 
 log = logging.getLogger('syspet')
-__version__ = '1.1.1'
+__version__ = '1.1.2'
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
 
 
@@ -397,7 +397,8 @@ def push_event(events, ts, tag, path, old, new, open_path):
     p = open_path.lower()  # 过滤基于完整路径（改名的显示串是相对名，不可用于匹配）
     if _only and not p.startswith(_only):  # 白名单=范围，黑名单=范围内剔噪音，两者叠加
         return
-    if any(x in p for x in _excludes):  # 必须含 syspet.log 自身，否则写日志→触发事件→再写日志无限循环
+    # 全部 .log 排除（应用日志高频刷写易刷屏；syspet.log 曾致"写日志→事件→再写日志"死循环）
+    if p.endswith('.log') or any(x in p for x in _excludes):
         return
     if events and events[0][1] == tag and events[0][2] == path:  # 相邻同文件同类型合并
         events[0] = (ts, tag, path, events[0][3] or old, new, open_path)
