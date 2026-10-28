@@ -2,9 +2,13 @@ import os
 from pathlib import Path
 import syspet
 from syspet import (handle_batch, ev_text, size, rr, split_ext, clip_path,
-                    push_event, enc, dec)
+                    push_event, enc, dec, _user_dirs)
 
 syspet._only, syspet._excludes = (), syspet.NOISE  # 隔离本机 syspet.json，固定过滤规则
+
+# 空配置默认监控范围：真实用户文件目录（注册表读取，含重定向），小写且以 \ 结尾
+_ud = _user_dirs()
+assert _ud and all(d == d.lower() and d.endswith('\\') and len(d) > 3 for d in _ud), _ud
 
 assert len(rr(0, 0, 92, 10, 4)) == 24 and rr(0, 0, 92, 10, 4)[0] == 4
 assert size(None) == '—' and size(2048) == '2 KB'

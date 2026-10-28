@@ -14,7 +14,7 @@ import win32crypt
 import win32file
 
 log = logging.getLogger('syspet')
-__version__ = '1.2.0'
+__version__ = '1.2.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -146,15 +146,34 @@ CFG_AI = BASE.with_suffix('.json')
 _excludes, _only = NOISE, ()
 
 
+def _user_dirs():
+    """注册表读真实桌面/文档/下载路径（含重定向，如桌面挪到 E:\桌面）"""
+    dirs = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                r'Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders') as k:
+            for n in ('Desktop', 'Personal', '{374DE290-123F-4565-9164-39C4925E467B}'):
+                try:
+                    dirs.append(os.path.expandvars(winreg.QueryValueEx(k, n)[0]))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return tuple(d.lower().replace('/', '\\').rstrip('\\') + '\\' for d in dirs)
+
+
 def load_excludes():
-    """加载排除/白名单规则：填了 only 只显示名单内目录，否则走黑名单"""
+    """加载排除/白名单规则：填了 only 只显示名单内目录；
+    未填则默认只看用户文件区（应用后台目录无边界，黑名单枚举不完）"""
     global _excludes, _only
     try:
         cfg = json.loads(CFG_AI.read_text('utf-8'))
     except (OSError, ValueError):
         cfg = {}
     _excludes = NOISE + tuple(x.lower() for x in cfg.get('exclude', []))
-    _only = tuple(x.lower().replace('/', '\\').rstrip('\\') + '\\' for x in cfg.get('only', []))
+    only_cfg = [x for x in cfg.get('only', []) if x]
+    _only = (tuple(x.lower().replace('/', '\\').rstrip('\\') + '\\' for x in only_cfg)
+             if only_cfg else _user_dirs())
 
 
 load_excludes()
@@ -624,12 +643,16 @@ class AICfg(tk.Toplevel):
                 self.status.config(text='「令牌」与「UID」需同时填写（或都留空）',
                                    fg='#f38ba8')
                 return
+        try:
+            cfg = json.loads(CFG_AI.read_text('utf-8'))
+        except (OSError, ValueError):
+            cfg = {}
         for p in self.provs:  # key/令牌加密落盘，明文不再留在 syspet.json
             p['key'] = enc(p['key'])
             if p.get('token'):
                 p['token'] = enc(p['token'])
-        CFG_AI.write_text(json.dumps({'providers': self.provs},
-                                     ensure_ascii=False, indent=2), 'utf-8')
+        cfg['providers'] = self.provs  # 只更新 providers，保留手写的 exclude/only
+        CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
         log.info('AI 配置已保存，共 %d 个供应商', len(self.provs))
         self.destroy()  # 主窗后台线程 ≤5 秒内自动加载新配置
 

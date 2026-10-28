@@ -43,7 +43,7 @@ syspet.log       运行日志
 
 ## 噪音排除
 
-内置排除系统位置：`C:\Windows\`、`C:\ProgramData\`、`C:\Program Files*\`、`AppData\Local\Temp`、回收站、pagefile、NTFS 元数据等；**所有 `.log` 文件**（应用日志高频刷写，含 SysPet 自身日志，防止监控自反馈）；目录自身的"修改"事件（条目变化，无信息量）也静音。
+未配置 `only` 时默认只监控**用户文件区**（真实桌面 / 文档 / 下载目录，自动识别重定向），后台应用目录的变化全部静音。内置排除系统位置：`C:\Windows\`、`C:\ProgramData\`、`C:\Program Files*\`、`AppData\Local\Temp`、回收站、pagefile、NTFS 元数据等；**所有 `.log` 文件**（应用日志高频刷写，含 SysPet 自身日志，防止监控自反馈）；目录自身的"修改"事件（条目变化，无信息量）也静音。
 
 应用后台噪音可在 `syspet.json` 追加（小写子串匹配，改后 5 秒内自动生效）：
 
