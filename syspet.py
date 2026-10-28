@@ -14,7 +14,7 @@ import win32crypt
 import win32file
 
 log = logging.getLogger('syspet')
-__version__ = '1.2.2'
+__version__ = '1.2.3'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -569,9 +569,10 @@ class AICfg(tk.Toplevel):
         self.btn_test = tk.Button(self, text='测试连接', command=self._test, **btn)
         self.btn_test.grid(row=1, column=3, padx=4, pady=2, sticky='w')
 
-        self.e_name, self.e_url, self.e_key = self._field('名称', 2, f), \
-            self._field('地址', 3, f), self._field('Key', 4, f)
-        self.e_token, self.e_uid = self._field('令牌*', 5, f), self._field('UID*', 6, f)
+        self.e_name, self.e_url = self._field('名称', 2, f), self._field('地址', 3, f)
+        self.e_key = self._field('Key', 4, f, secret=True)      # 凭据类输入框 ● 遮罩
+        self.e_token = self._field('令牌*', 5, f, secret=True)
+        self.e_uid = self._field('UID*', 6, f)
         self.status = tk.Label(self, bg=BG, fg=DIM, font=('Microsoft YaHei UI', 9),
                                anchor='w', text='*可选：控制台"系统访问令牌+用户ID"，填了显示账号余额')
         self.status.grid(row=7, column=0, columnspan=4, padx=10, sticky='we')
@@ -579,11 +580,11 @@ class AICfg(tk.Toplevel):
                   ).grid(row=8, column=0, columnspan=4, padx=10, pady=(4, 10), sticky='w')
         self._refresh()
 
-    def _field(self, label, row, f):
+    def _field(self, label, row, f, secret=False):
         tk.Label(self, text=label, bg=BG, fg=DIM, font=f
                  ).grid(row=row, column=0, padx=(10, 4), pady=2, sticky='w')
         e = tk.Entry(self, bg='#313244', fg=FG, bd=0, width=42, font=f,
-                     insertbackground=FG)
+                     insertbackground=FG, show='●' if secret else '')
         e.grid(row=row, column=1, columnspan=3, padx=(0, 10), pady=2, sticky='we')
         return e
 
