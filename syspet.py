@@ -13,8 +13,15 @@ import win32con
 import win32crypt
 import win32file
 
+try:  # 通知捕获依赖；缺失时仅关闭该功能，不影响其余监控
+    import comtypes.client
+    comtypes.client.GetModule('UIAutomationCore.dll')
+    from comtypes.gen.UIAutomationClient import CUIAutomation, IUIAutomation
+except Exception:
+    CUIAutomation = IUIAutomation = None
+
 log = logging.getLogger('syspet')
-__version__ = '1.4.0'
+__version__ = '1.5.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -58,7 +65,8 @@ def setup_log():
         '%(asctime)s [%(levelname)s] %(threadName)s %(message)s'))
     log.addHandler(h)
     log.setLevel(logging.INFO)
-    threading.excepthook = lambda a: log.error('线程异常', exc_info=a.exc_info)
+    threading.excepthook = lambda a: log.error(
+        '线程异常', exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 
 KEEP = 200
 HINT = '点击记录打开文件 · 滚轮翻看 · 拖动 · 右键'
@@ -424,6 +432,53 @@ def gpu_loop(state):
         time.sleep(2)
 
 
+NOTIFY_JUNK = ('新通知', '此通知的设置', '将此通知移动到操作中心', '关闭通知')
+
+
+def scan_toasts(uia, root, cond, seen):
+    """单轮 Toast 扫描 → [(app, 正文)]。只能在无 Tk 的进程里跑：
+    Tk 进程内任何线程调 UIA FindAll 都会死锁（Win10 实测）"""
+    arr = root.FindAll(2, cond)  # TreeScope_Children：桌面顶层窗口
+    out = []
+    for i in range(arr.Length):
+        el = arr.GetElement(i)
+        # 先判类名/标题再读句柄：受限系统窗口读句柄会抛 COM 错，须跳过而非毁掉整轮
+        if el.CurrentClassName != 'Windows.UI.Core.CoreWindow':
+            continue
+        if el.CurrentName != '新通知':  # 开始菜单/通知中心等同类名窗口靠标题排除
+            continue
+        h = el.CurrentNativeWindowHandle
+        if h in seen:
+            continue
+        seen.add(h)
+        if len(seen) > 256:  # ponytail: 句柄集合粗暴清空，256 内无复用风险
+            seen.clear()
+        kids = el.FindAll(7, cond)  # Subtree 全文
+        names = [kids.GetElement(j).CurrentName for j in range(kids.Length)]
+        names = [t for t in dict.fromkeys(names)
+                 if t and t not in NOTIFY_JUNK and not t.startswith('来自')]
+        if not names:
+            continue
+        # UIA 首个文本是来源显示名（钉钉/微信），其余是标题+正文；进程名仅兜底
+        display, body = names[0], ' · '.join(names[1:])
+        out.append((display, body or display))
+    return out
+
+
+def notify_child():
+    """独立通知子进程入口：轮询 Toast，每行 'app\\t正文' 写 stdout（管道）"""
+    uia = comtypes.client.CreateObject(CUIAutomation, interface=IUIAutomation)
+    root, cond = uia.GetRootElement(), uia.CreateTrueCondition()
+    seen = set()
+    while True:
+        try:
+            for app, body in scan_toasts(uia, root, cond, seen):
+                os.write(1, f'{app}\t{body}\n'.encode('utf-8'))
+        except Exception:
+            pass  # 单轮失败（锁屏/UIA 忙）跳过
+        time.sleep(2)
+
+
 def fsize(path):
     try:
         return os.stat(path).st_size
@@ -437,6 +492,11 @@ def drives():
 
 
 def push_event(events, ts, tag, path, old, new, open_path):
+    if tag == '通知':  # 通知非文件事件，不走路径过滤（白名单模式下也要显示）
+        events.insert(0, (ts, tag, path, old, new, open_path))
+        del events[KEEP:]
+        log.info('%s %s', tag, path)
+        return
     p = open_path.lower()  # 过滤基于完整路径（改名的显示串是相对名，不可用于匹配）
     if _only and not p.startswith(_only):  # 白名单=范围，黑名单=范围内剔噪音，两者叠加
         return
@@ -538,7 +598,8 @@ def clip_path(path, limit=44):
 
 def ev_text(ev):
     ts, tag, path, old, new = ev[:5]
-    return f'{ts} {tag} {clip_path(path)}  {size(old)} → {size(new)}'
+    sz = '' if tag == '通知' else f'  {size(old)} → {size(new)}'
+    return f'{ts} {tag} {clip_path(path)}{sz}'
 
 
 class AICfg(tk.Toplevel):
@@ -727,6 +788,18 @@ class Pet:
                          daemon=True).start()
         threading.Thread(target=ai_net_loop, args=(self.ai_state,),
                          daemon=True).start()
+        # 通知捕获：独立子进程轮询 UIA（Tk 进程内调 UIA 必死锁），管道行协议回传
+        self._nproc = None
+        if CUIAutomation:
+            cmd = [sys.executable] + ([] if getattr(sys, 'frozen', False)
+                                       else [str(Path(__file__).resolve())]) + ['--notify']
+            try:
+                self._nproc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW)
+                threading.Thread(target=self._read_notify, daemon=True).start()
+            except OSError as e:
+                log.warning('通知子进程启动失败: %s', e)
         # 先按配置渲染占位行，数据到达后仅替换文本，窗口不跳变
         try:
             _p = json.loads(CFG_AI.read_text('utf-8')).get('providers', [])
@@ -772,9 +845,10 @@ class Pet:
         self.txt.tag_config('ts', foreground=DIM)
         self.txt.tag_config('ext', foreground='#c99a5b')
         for t, c in (('新增', '#6aaa7f'), ('删除', '#e07a7a'),
-                     ('修改', '#d9a94e'), ('改名', '#7d9ec7')):
+                     ('修改', '#d9a94e'), ('改名', '#7d9ec7'),
+                     ('通知', '#a78bb7')):
             self.txt.tag_config(f't-{t}', foreground=c)
-        for t in ('ts', 'ev', 'ext', 't-新增', 't-删除', 't-修改', 't-改名'):
+        for t in ('ts', 'ev', 'ext', 't-新增', 't-删除', 't-修改', 't-改名', 't-通知'):
             self.txt.tag_bind(t, '<Button-1>', self._open_ev)
             self.txt.tag_bind(t, '<Button-3>', self._ctx_ev)
 
@@ -801,6 +875,16 @@ class Pet:
         r.update_idletasks()
         r.geometry(f'+{r.winfo_screenwidth() - r.winfo_width() - 16}'
                    f'+{r.winfo_screenheight() - r.winfo_height() - 56}')
+
+    def _read_notify(self):
+        """读通知子进程 stdout：每行 'app\t正文' → 事件流"""
+        for raw in self._nproc.stdout:
+            line = raw.decode('utf-8').rstrip('\n')
+            if not line:
+                continue
+            app, _, body = line.partition('\t')
+            push_event(self.events, time.strftime('%H:%M:%S'), '通知',
+                       f'{app} {body}' if app else body, None, None, '')
 
     def _grab(self, e):
         self._d = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
@@ -861,7 +945,8 @@ class Pet:
         t.insert('1.0', base, 'ev')                            #        主体
         t.insert('1.0', '  ', 'ev')                            #        缩进
         t.insert('1.0', '\n')                                  # 摘要→路径换行
-        t.insert('1.0', f'  {size(old)} → {size(new)}', 'ev')  # 摘要行: 大小
+        t.insert('1.0', '' if tag == '通知' else f'  {size(old)} → {size(new)}',
+                 'ev')                                         # 摘要行: 大小（通知无大小）
         t.insert('1.0', f'{tag} ', (f't-{tag}', 'ev'))         #        类型
         t.insert('1.0', f'{ts} ', ('ts', 'ev'))                #        时间
         if int(t.index('end-1c').split('.')[0]) > KEEP * 2:
@@ -875,9 +960,15 @@ class Pet:
         return i if 0 <= i < len(self.events) else None
 
     def _open_ev(self, e):
-        """点击事件行：文件还在就直接打开，否则提示"""
+        """点击事件行：文件还在就直接打开；通知行打开系统通知中心"""
         i = self._line_ev(e)
         if i is not None:
+            if self.events[i][1] == '通知':
+                try:
+                    os.startfile('ms-actioncenter:')
+                except OSError:
+                    self._flash('无法打开通知中心')
+                return 'break'
             p = self.events[i][5]
             if os.path.exists(p):
                 os.startfile(p)
@@ -946,4 +1037,10 @@ class Pet:
 
 
 if __name__ == '__main__':
-    Pet().root.mainloop()
+    if len(sys.argv) > 1 and sys.argv[1] == '--notify':
+        notify_child()
+    else:
+        pet = Pet()
+        pet.root.mainloop()
+        if pet._nproc:
+            pet._nproc.terminate()

@@ -58,6 +58,11 @@ push_event(_ev2, '12:00:00', '修改', 'app.log', 1, 2, 'E:\\桌面\\app.log')
 push_event(_ev2, '12:00:00', '修改', 'a.txt', 1, 2, 'E:\\桌面\\a.txt')
 assert len(_ev2) == 1 and _ev2[0][2] == 'a.txt', _ev2
 syspet._only = ()
+
+# 通知事件：不受白名单/黑名单过滤（非文件），显示无大小列
+_ev3 = []
+push_event(_ev3, '12:00:00', '通知', 'WeChat 你有一条新消息', None, None, '')
+assert len(_ev3) == 1 and ev_text(_ev3[0]) == '12:00:00 通知 WeChat 你有一条新消息'
 long_p = 'C:\\' + 'x' * 80 + '\\file.txt'
 assert clip_path(long_p).endswith('file.txt') and clip_path(long_p).startswith('C:\\')
 assert clip_path('C:\\short\\a.txt') == 'C:\\short\\a.txt'
