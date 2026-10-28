@@ -14,7 +14,7 @@ import win32crypt
 import win32file
 
 log = logging.getLogger('syspet')
-__version__ = '1.3.0'
+__version__ = '1.4.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -62,8 +62,8 @@ def setup_log():
 
 KEEP = 200
 HINT = '点击记录打开文件 · 滚轮翻看 · 拖动 · 右键'
-BG, FG, DIM = '#1e1e2e', '#cdd6f4', '#7f849c'
-TRACK, ACCENT = '#313244', '#89b4fa'
+BG, FG, DIM = '#f6f5f2', '#3d3a37', '#807b76'
+TRACK, ACCENT = '#e7e4df', '#e8862e'
 TAG_CN = {1: '新增', 2: '删除', 3: '修改', 4: '改名'}
 NOTIFY_MASK = (win32con.FILE_NOTIFY_CHANGE_FILE_NAME
                | win32con.FILE_NOTIFY_CHANGE_LAST_WRITE
@@ -98,7 +98,7 @@ def speed(b):
 
 
 def mood(pct):
-    return '#a6e3a1' if pct < 60 else '#f9e2af' if pct < 90 else '#f38ba8'
+    return '#7fbf8e' if pct < 60 else '#eebe55' if pct < 90 else '#e98181'
 
 
 class Gauge:
@@ -738,20 +738,20 @@ class Pet:
         r = self.root = tk.Tk()
         r.report_callback_exception = lambda *a: log.error('UI 回调异常', exc_info=a)
         r.overrideredirect(True)
-        r.attributes('-topmost', True, '-alpha', 0.92)
+        r.attributes('-topmost', True, '-alpha', 0.97)
         r.configure(bg=BG)
-        f, e_f = ('Consolas', 10), ('Consolas', 10)
+        f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
 
-        head = tk.Frame(r, bg='#181825')
+        head = tk.Frame(r, bg='#efece6')
         head.pack(fill='x', ipady=4)
-        tk.Label(head, text='SysPet', bg='#181825', fg=ACCENT,
+        tk.Label(head, text='SysPet', bg='#efece6', fg=ACCENT,
                  font=('Microsoft YaHei UI', 10, 'bold')).pack(side='left', padx=(12, 6))
-        hf = ('Consolas', 9)
-        self.c_down = tk.Label(head, bg='#181825', fg=FG, font=hf, anchor='w')
+        hf = ('Microsoft YaHei UI', 9)
+        self.c_down = tk.Label(head, bg='#efece6', fg=FG, font=hf, anchor='w')
         self.c_down.pack(side='left')
-        self.c_up = tk.Label(head, bg='#181825', fg=DIM, font=hf, anchor='w')
+        self.c_up = tk.Label(head, bg='#efece6', fg=DIM, font=hf, anchor='w')
         self.c_up.pack(side='left', padx=(8, 0))
-        self.c_clk = tk.Label(head, bg='#181825', fg=DIM, font=hf)
+        self.c_clk = tk.Label(head, bg='#efece6', fg=DIM, font=hf)
         self.c_clk.pack(side='right', padx=(0, 12))
 
         sysf = tk.Frame(r, bg=BG)
@@ -770,9 +770,9 @@ class Pet:
                            state='disabled', cursor='arrow')
         self.txt.pack(fill='both', expand=True, padx=10)
         self.txt.tag_config('ts', foreground=DIM)
-        self.txt.tag_config('ext', foreground='#94e2d5')
-        for t, c in (('新增', '#a6e3a1'), ('删除', '#f38ba8'),
-                     ('修改', '#f9e2af'), ('改名', '#89b4fa')):
+        self.txt.tag_config('ext', foreground='#c99a5b')
+        for t, c in (('新增', '#6aaa7f'), ('删除', '#e07a7a'),
+                     ('修改', '#d9a94e'), ('改名', '#7d9ec7')):
             self.txt.tag_config(f't-{t}', foreground=c)
         for t in ('ts', 'ev', 'ext', 't-新增', 't-删除', 't-修改', 't-改名'):
             self.txt.tag_bind(t, '<Button-1>', self._open_ev)
@@ -922,10 +922,10 @@ class Pet:
             row = tk.Frame(self.ai_f, bg=BG)
             row.pack(fill='x')
             n = tk.Label(row, text=f'{name[:6]}', bg=BG, fg=DIM, width=7,
-                         font=('Consolas', 10), anchor='w')
+                         font=('Microsoft YaHei UI', 9), anchor='w')
             n.pack(side='left')
             v = tk.Label(row, text=val or '查询失败', bg=BG, fg=FG, width=36,
-                         font=('Consolas', 10), anchor='w')
+                         font=('Microsoft YaHei UI', 9), anchor='w')
             v.pack(side='left', padx=(8, 0))
             self._ai_rows += [row]
 
@@ -941,7 +941,7 @@ class Pet:
             self._flash('已' + ('开启' if on else '关闭') + '开机自启动')
 
     def _flash(self, msg):
-        self.hint.config(text=msg, fg='#f38ba8')
+        self.hint.config(text=msg, fg='#e07a7a')
         self.root.after(2000, lambda: self.hint.config(text=HINT, fg=DIM))
 
 
