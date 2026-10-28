@@ -25,6 +25,15 @@ push_event(_ev, '12:00:00', '修改', 'C:\\Users\\u\\AppData\\Local\\Temp\\t.tmp
 assert _ev == [], _ev
 push_event(_ev, '12:00:00', '修改', 'E:\\桌面\\报告.docx', 1, 2, 'E:\\桌面\\报告.docx')
 assert len(_ev) == 1
+
+# 回归：白名单模式内黑名单仍须生效——syspet.log 在白名单目录内曾致
+# "写日志→触发监控事件→再写日志"的自激励循环，事件列表与日志双膨胀
+syspet._only = ('e:\\桌面\\',)
+_ev2 = []
+push_event(_ev2, '12:00:00', '修改', 'syspet.log', 1, 2, 'E:\\桌面\\syspet\\syspet.log')
+push_event(_ev2, '12:00:00', '修改', 'a.txt', 1, 2, 'E:\\桌面\\a.txt')
+assert _ev2 and _ev2[0][2] == 'a.txt', _ev2
+syspet._only = ()
 long_p = 'C:\\' + 'x' * 80 + '\\file.txt'
 assert clip_path(long_p).endswith('file.txt') and clip_path(long_p).startswith('C:\\')
 assert clip_path('C:\\short\\a.txt') == 'C:\\short\\a.txt'
