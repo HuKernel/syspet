@@ -97,10 +97,11 @@ python syspet.py                  # 或双击 启动.bat
 
 内置排除：`C:\Windows\`、`C:\ProgramData\`、`C:\Program Files*\`、`AppData\Local\Temp`、回收站、pagefile、NTFS 元数据等系统位置；**所有 `.log` 文件**（应用日志高频刷写，含 SysPet 自身日志，防止监控自反馈）；目录自身的「修改」事件。应用后台噪音可在 `syspet.json` 的 `exclude` 追加，5 秒内自动生效。
 
-## 打包
+## 打包与发布
 
 ```bash
-pyinstaller --onefile --noconsole --name syspet --hidden-import comtypes.stream syspet.py
+pyinstaller --onefile --noconsole --name syspet --icon=syspet.ico --hidden-import comtypes.stream syspet.py
+python release.py    # 打 tag + push + 创建 GitHub Release 并上传 exe（一键）
 ```
 
 ## FAQ
