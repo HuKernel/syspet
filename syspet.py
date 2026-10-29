@@ -2,6 +2,7 @@
 依赖: psutil, pywin32（见 requirements.txt）"""
 import base64, ctypes, datetime, hashlib, hmac, json, logging, os, shutil, subprocess
 import sys, threading, time, tkinter as tk, uuid, webbrowser, winreg
+from tkinter import ttk
 import urllib.error, urllib.parse, urllib.request
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -21,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.3.0'
+__version__ = '2.3.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -772,13 +773,26 @@ class AICfg(tk.Toplevel):
         F = 'Microsoft YaHei UI'
 
         top = tk.Frame(self, bg=self.WBG)
-        top.pack(fill='x', padx=16, pady=(12, 6))
-        tk.Label(top, text='AI 供应商', bg=self.WBG, fg=self.WFG,
+        top.pack(fill='x', padx=16, pady=(12, 4))
+        tk.Label(top, text='设置', bg=self.WBG, fg=self.WFG,
                  font=(F, 13, 'bold')).pack(anchor='w')
-        tk.Label(top, text='添加并管理你的 AI 平台密钥，保存后自动生效', bg=self.WBG,
+        tk.Label(top, text='保存后自动生效；密钥经 Windows DPAPI 加密存储', bg=self.WBG,
                  fg=self.DIM, font=(F, 9)).pack(anchor='w', pady=(2, 0))
 
-        c1 = self._card()
+        style = ttk.Style(self)
+        style.configure('Set.TNotebook', background=self.WBG, borderwidth=0)
+        style.configure('Set.TNotebook.Tab', background=self.WBG, foreground=self.DIM,
+                        padding=(16, 7), font=(F, 10), borderwidth=0)
+        style.map('Set.TNotebook.Tab',
+                  background=[('selected', self.CARD)], foreground=[('selected', self.ACC)])
+        nb = ttk.Notebook(self, style='Set.TNotebook')
+        nb.pack(fill='both', expand=True, padx=16, pady=(4, 4))
+        tab_ai = tk.Frame(nb, bg=self.WBG)
+        nb.add(tab_ai, text=' AI 供应商 ')
+        tab_gen = tk.Frame(nb, bg=self.WBG)
+        nb.add(tab_gen, text=' 通用设置 ')
+
+        c1 = self._card(tab_ai)
         self.lb = tk.Listbox(c1, bg=self.CARD, fg=self.WFG, bd=0, width=48, height=3,
                              font=(F, 10), highlightthickness=1,
                              highlightbackground=self.LINE, highlightcolor=self.ACC,
@@ -794,7 +808,7 @@ class AICfg(tk.Toplevel):
         tk.Button(brow, text='＋ 新增', command=self._add, **btn2).pack(side='left')
         tk.Button(brow, text='删除', command=self._del, **btn2).pack(side='left', padx=(8, 0))
 
-        c2 = self._card()
+        c2 = self._card(tab_ai)
         self.e_name = self._field(c2, '名称', F)
         self.e_url = self._field(c2, '地址', F)
         self.e_key = self._field(c2, 'Key', F, secret=True)          # 凭据框 ● 遮罩
@@ -803,16 +817,16 @@ class AICfg(tk.Toplevel):
         self.btn_test = tk.Button(c2, text='测试连接', command=self._test, **btn2)
         self.btn_test.pack(anchor='w', padx=10, pady=(8, 10))
 
-        c3 = self._card()
-        tk.Label(c3, text='通用设置', bg=self.CARD, fg=self.WFG,
-                 font=(F, 10, 'bold'), anchor='w',
-                 padx=10).pack(fill='x', pady=(10, 2))
+        c3 = self._card(tab_gen)
+        c3.pack(fill='x', pady=(6, 3))
         self.e_alert = self._field(c3, '用量告警阈值 %（0=禁用，默认 90）', F)
         self.e_alert.insert(0, cfg.get('ai_alert', 90))
         self.e_rest = self._field(c3, '久坐提醒间隔分钟（0=禁用，默认 45）', F)
         self.e_rest.insert(0, cfg.get('rest', 45))
         self.e_alpha = self._field(c3, '待机透明度 %（5-95，默认 72；悬停恒清晰）', F)
         self.e_alpha.insert(0, cfg.get('alpha', 72))
+        tk.Label(c3, text='通用项保存后立即生效；透明度于下次启动应用', bg=self.CARD,
+                 fg=self.DIM, font=(F, 9), anchor='w', padx=10).pack(fill='x', pady=(6, 10))
 
         bot = tk.Frame(self, bg=self.WBG)
         bot.pack(fill='x', padx=16, pady=(4, 12))
@@ -825,10 +839,10 @@ class AICfg(tk.Toplevel):
                   cursor='hand2').pack(side='right')
         self._refresh()
 
-    def _card(self):
-        c = tk.Frame(self, bg=self.CARD, highlightthickness=1,
+    def _card(self, parent):
+        c = tk.Frame(parent, bg=self.CARD, highlightthickness=1,
                      highlightbackground=self.LINE)
-        c.pack(fill='x', padx=16, pady=3)
+        c.pack(fill='x', padx=0, pady=3)
         return c
 
     def _field(self, parent, label, f, secret=False):
