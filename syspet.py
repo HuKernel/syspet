@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.8.1'
+__version__ = '1.9.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -69,7 +69,7 @@ def setup_log():
         '线程异常', exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 
 KEEP = 200
-HINT = '点事件打开 · 点CPU/内存看进程 · 右键'
+HINT = '点事件打开 · 拖到屏幕边缘隐藏 · 右键'
 BG, FG, DIM = '#1c1c1e', '#f2f2f2', '#98989d'
 TRACK, ACCENT = '#3a3a3c', '#4aa3ff'
 TAG_CN = {1: '新增', 2: '删除', 3: '修改', 4: '改名'}
@@ -871,6 +871,8 @@ class Pet:
         self._ai_rows, self._ai_ver = [], -1
         self._io, self._t = None, time.time()
         self._tr, self._tr_tick = traffic_load(), 0  # 今日流量累计，每 5 分钟落盘
+        self._edge, self._hidden, self._edge_timer = None, False, None  # 贴边状态
+        self._edge_pos = (0, 0)
         self.gpu_state = {'gpu': (None, None)}
         threading.Thread(target=drive_manager, args=(self.events, {}),
                          daemon=True).start()
@@ -995,6 +997,52 @@ class Pet:
 
     def _drop(self, _e):
         cfg_update(pos=f'{self.root.winfo_x()},{self.root.winfo_y()}')
+        edge = self._snap_edge()
+        if edge:  # 贴边：记方向与显示位置（pos 已存滑出前位置，重启不丢）
+            self._edge, self._hidden = edge, True
+            self._edge_pos = (self.root.winfo_x(), self.root.winfo_y())
+            self._edge_out()
+        else:
+            self._edge = None  # 松手处不在边缘 → 取消贴边状态
+
+    def _snap_edge(self):
+        """松手时窗口贴近/越出的屏幕边 → 方向；都不贴返回 None"""
+        x, y = self.root.winfo_x(), self.root.winfo_y()
+        W, H = self.root.winfo_width(), self.root.winfo_height()
+        SW, SH = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        cand = {'left': x, 'top': y,
+                'right': SW - W - x, 'bottom': SH - H - y}
+        edge, dist = min(cand.items(), key=lambda kv: kv[1])
+        return edge if dist <= 6 else None
+
+    def _edge_out(self):
+        """滑出到贴边侧，屏幕内只留 2px 感应条"""
+        self._slide_to(*self._edge_xy())
+
+    def _edge_xy(self, out=True):
+        """贴边滑出坐标 / 滑回坐标（_edge_pos 为贴边前的显示位置）"""
+        W, H = self.root.winfo_width(), self.root.winfo_height()
+        SW, SH = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        x, y = self.root.winfo_x(), self.root.winfo_y()
+        return {'left': (2 - W if out else self._edge_pos[0], y),
+                'right': (SW - 2 if out else self._edge_pos[0], y),
+                'top': (x, 2 - H if out else self._edge_pos[1]),
+                'bottom': (x, SH - 2 if out else self._edge_pos[1])}[self._edge]
+
+    def _edge_back(self):
+        self._slide_to(*self._edge_xy(out=False))
+
+    def _slide_to(self, tx, ty):
+        """指数逼近滑动动画（~150ms）"""
+        def step():
+            x, y = self.root.winfo_x(), self.root.winfo_y()
+            dx, dy = (tx - x) / 3, (ty - y) / 3
+            if abs(dx) < 2 and abs(dy) < 2:
+                self.root.geometry(f'+{tx}+{ty}')
+            else:
+                self.root.geometry(f'+{round(x + dx)}+{round(y + dy)}')
+                self.root.after(15, step)
+        step()
 
     def _quit(self):
         cfg_update(traffic=self._tr)  # 流量累计落盘
@@ -1028,15 +1076,25 @@ class Pet:
         w.after(8000, w.destroy)  # 超时自动关
 
     def _hover(self, on):
-        """悬停聚焦：平时半透明不遮挡，鼠标进入恢复清晰。
-        Leave 会因跨子组件反复触发，需确认指针真离开了本窗才降透明"""
-        if not on:
-            x, y = self.root.winfo_pointerxy()
-            fx, fy = self.root.winfo_rootx(), self.root.winfo_rooty()
-            if (fx <= x < fx + self.root.winfo_width()
-                    and fy <= y < fy + self.root.winfo_height()):
-                return
-        self.root.attributes('-alpha', 0.97 if on else 0.55)
+        """悬停聚焦：平时半透明不遮挡，鼠标进入恢复清晰；
+        贴边态兼管滑回/滑出（Leave 需确认指针真离开本窗才动作）"""
+        if on:
+            if getattr(self, '_edge', None) and self._hidden:
+                self._hidden = False
+                if self._edge_timer:
+                    self.root.after_cancel(self._edge_timer)
+                self._edge_back()
+            self.root.attributes('-alpha', 0.97)
+            return
+        x, y = self.root.winfo_pointerxy()
+        fx, fy = self.root.winfo_rootx(), self.root.winfo_rooty()
+        if (fx <= x < fx + self.root.winfo_width()
+                and fy <= y < fy + self.root.winfo_height()):
+            return
+        self.root.attributes('-alpha', 0.55)
+        if getattr(self, '_edge', None) and not self._hidden:
+            self._hidden = True  # 离开 800ms 后再滑出，防抖动误触
+            self._edge_timer = self.root.after(800, self._edge_out)
 
     def _grab(self, e):
         self._d = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
