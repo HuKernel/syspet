@@ -1,7 +1,7 @@
 """SysPet — 桌宠式系统监控悬浮窗：CPU/GPU/内存/磁盘/网速 + 全盘文件变化 + AI 平台用量。
 依赖: psutil, pywin32（见 requirements.txt）"""
 import base64, ctypes, datetime, hashlib, hmac, json, logging, os, shutil, subprocess
-import sys, threading, time, tkinter as tk, uuid, winreg
+import sys, threading, time, tkinter as tk, uuid, webbrowser, winreg
 import urllib.error, urllib.parse, urllib.request
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.0.1'
+__version__ = '2.1.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -116,8 +116,9 @@ class Gauge:
     W, H, R = 95, 9, 3
 
     def __init__(self, parent, name, row, col, font, full=False):
-        tk.Label(parent, text=name, bg=BG, fg=DIM, font=font, width=4,
-                 anchor='w').grid(row=row, column=col, sticky='w')
+        self.name_lb = tk.Label(parent, text=name, bg=BG, fg=DIM, font=font,
+                                width=4, anchor='w')
+        self.name_lb.grid(row=row, column=col, sticky='w')
         self._w = self.W * 2 + 62 if full else self.W
         self.cv = tk.Canvas(parent, width=self._w, height=self.H, bg=BG,
                             highlightthickness=0, bd=0)
@@ -128,31 +129,31 @@ class Gauge:
                             width=4, anchor='e')
         self.val.grid(row=row, column=col + 5 if full else col + 2, sticky='e')
 
-    def set(self, pct, color):
+    def set(self, pct, color, unit='%'):
         self.cv.delete('all')
         w, h, r = self._w, self.H, self.R
         self.cv.create_polygon(*rr(0, 0, w, h, r), fill=TRACK, smooth=True)
         if pct is not None:
             fw = max(r + 1, round(w * pct / 100))
             self.cv.create_polygon(*rr(0, 0, fw, h, r), fill=color, smooth=True)
-            self.val.config(text=f'{pct:3.0f}%')
+            self.val.config(text=f'{pct:3.0f}{unit}')
         else:
             self.val.config(text='—')
 
 
 def gpu_probe():
-    """nvidia-smi → (利用率%, 显存占用%)；无 N 卡或查询失败返回 (None, None)"""
+    """nvidia-smi → (利用率%, 显存占用%, 温度℃)；无 N 卡或失败返回 (None,)*3"""
     try:
         out = subprocess.run(
-            ['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total',
+            ['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu',
              '--format=csv,noheader,nounits'],
             capture_output=True, text=True, timeout=3,
             creationflags=subprocess.CREATE_NO_WINDOW  # pythonw 下防控制台黑窗弹闪抢焦点
             ).stdout
-        util, used, total = (int(x) for x in out.strip().splitlines()[0].split(','))
-        return util, round(100 * used / total)
+        util, used, total, temp = (int(x) for x in out.strip().splitlines()[0].split(','))
+        return util, round(100 * used / total), temp
     except (OSError, ValueError, ZeroDivisionError, subprocess.SubprocessError):
-        return None, None
+        return None, None, None
 
 
 CFG_AI = BASE.with_suffix('.json')
@@ -251,6 +252,8 @@ def test_provider(url, key, token=''):
     if 'bigmodel.cn' in url or 'z.ai' in url:
         r = zhipu_usage(p)
         return r or '失败：无法获取智谱用量（无 Coding Plan 订阅或 Key 无效）'
+    if 'deepseek.com' in url:
+        return deepseek_usage(p) or '失败：无法获取 DeepSeek 余额'
     try:
         base = url.rstrip('/')
         sub = http_json(base + '/v1/dashboard/billing/subscription', key, timeout=6)
@@ -377,12 +380,25 @@ def newapi_account(p):
         return None
 
 
+def deepseek_usage(p):
+    """DeepSeek 官方：/user/balance → CNY 余额"""
+    try:
+        d = http_json(p['url'].rstrip('/') + '/user/balance', p['key'])
+        bal = sum(float(x.get('total_balance') or 0)
+                  for x in d.get('balance_infos', []) if x.get('currency') == 'CNY')
+        return f'余 ¥{bal:.2f}'
+    except Exception:
+        return None
+
+
 def fetch_one(p):
     """查询单个供应商 → 展示文本；按地址自动识别协议（智谱 / new-api 系）
     配置了访问令牌+UID 的走账号视角，否则走 sk key 的令牌视角"""
     url = p.get('url', '')
     if 'bigmodel.cn' in url or 'z.ai' in url:
         return zhipu_usage(p)
+    if 'deepseek.com' in url:  # DeepSeek 官方：余额接口
+        return deepseek_usage(p) or '填写官方地址与 Key 后可查余额'
     if 'dashscope.aliyuncs.com' in url:  # 阿里百炼官方：BSS 协议
         if p.get('key') and p.get('token'):
             return ali_usage(p)
@@ -432,16 +448,18 @@ def cfg_update(**patch):
 
 
 def traffic_load():
-    """今日流量累计 {'date','down','up'}；非当日的旧记录清零"""
+    """流量记录 {'days': [最近 ≤7 天]}；尾项为今日，同日重启续算不清零"""
     today = time.strftime('%Y-%m-%d')
+    days = []
     try:
         t = json.loads(CFG_AI.read_text('utf-8')).get('traffic') or {}
-        if t.get('date') == today:
-            return {'date': today, 'down': float(t.get('down', 0)),
-                    'up': float(t.get('up', 0))}
+        days = t.get('days') or ([t] if t.get('date') else [])
     except (OSError, ValueError, AttributeError):
         pass
-    return {'date': today, 'down': 0.0, 'up': 0.0}
+    if days and days[-1].get('date') == today:
+        return {'days': days[-7:]}
+    return {'days': [d for d in days if d.get('date') != today][-6:]
+            + [{'date': today, 'down': 0.0, 'up': 0.0}]}
 
 
 def pos_load():
@@ -475,6 +493,53 @@ def top_procs(kind):
     return rows[:5]
 
 
+RELEASE_URL = 'https://github.com/HuKernel/syspet/releases/latest'
+
+
+def _vtuple(v):
+    try:
+        return tuple(int(x) for x in v.split('.'))
+    except ValueError:
+        return (0,)
+
+
+def check_update(events):
+    """启动 10s 后查最新 Release；新版入事件流，点击打开下载页"""
+    time.sleep(10)
+    try:
+        with urllib.request.urlopen(
+                'https://api.github.com/repos/HuKernel/syspet/releases/latest',
+                timeout=8) as r:
+            tag = json.loads(r.read()).get('tag_name', '').lstrip('v')
+        if tag and _vtuple(tag) > _vtuple(__version__):
+            push_event(events, time.strftime('%H:%M:%S'), '通知',
+                       f'SysPet {tag} 可更新（点击打开下载页）', None, None, RELEASE_URL)
+    except Exception:
+        pass  # 离线/接口变更是常态，静默
+
+
+def toast(title, body):
+    """弹 Windows 原生通知（PowerShell WinRT 投射；AUMID 首次注册）"""
+    try:
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
+                                r'SOFTWARE\Classes\AppUserModelId\SysPet') as k:
+            winreg.SetValueEx(k, 'DisplayName', 0, winreg.REG_SZ, 'SysPet')
+        esc = lambda s: s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        ps = ("[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,"
+              "ContentType=WindowsRuntime]|Out-Null;"
+              "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
+              "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+              "$t=$x.GetElementsByTagName('text');"
+              f"[void]$t.Item(0).AppendChild($x.CreateTextNode('{esc(title)}'));"
+              f"[void]$t.Item(1).AppendChild($x.CreateTextNode('{esc(body)}'));"
+              "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
+              "'SysPet').Show([Windows.UI.Notifications.ToastNotification]::new($x))")
+        subprocess.run(['powershell', '-NoProfile', '-Command', ps], timeout=8,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+    except Exception as e:
+        log.warning('通知发送失败: %r', e)
+
+
 def ai_net_loop(state, events):
     """供应商用量定时查询（默认 60s 一轮，配置变化 ≤5s 热生效）；
     数据版本号驱动 UI 重绘。秒级轮询易触发平台限流，勿调太低"""
@@ -506,6 +571,7 @@ def ai_net_loop(state, events):
                     push_event(events, time.strftime('%H:%M:%S'), '告警',
                                f'{name} 已用 {pct}%（阈值 {alert}%）',
                                None, None, '')
+                    toast('SysPet 告警', f'{name} 已用 {pct}%（阈值 {alert}%）')
             next_poll = time.time() + 60
         time.sleep(5)
 
@@ -539,6 +605,8 @@ def scan_toasts(uia, root, cond, seen):
             seen.clear()
         kids = el.FindAll(7, cond)  # Subtree 全文
         names = [kids.GetElement(j).CurrentName for j in range(kids.Length)]
+        if names and names[0] == 'SysPet':
+            continue  # 自己发的告警 Toast，事件流已有，防重复捕获
         names = [t for t in dict.fromkeys(names)
                  if t and t not in NOTIFY_JUNK and not t.startswith('来自')]
         if not names:
@@ -876,6 +944,7 @@ class Pet:
         self._tr, self._tr_tick = traffic_load(), 0  # 今日流量累计，每 5 分钟落盘
         self._edge, self._hidden, self._edge_timer = None, False, None  # 贴边状态
         self._edge_pos = (0, 0)
+        self._armed = set()  # 系统告警武装状态
         self.gpu_state = {'gpu': (None, None)}
         threading.Thread(target=drive_manager, args=(self.events, {}),
                          daemon=True).start()
@@ -885,6 +954,8 @@ class Pet:
                          args=(self.ai_state, self.events), daemon=True).start()
         # 通知捕获：独立子进程轮询 UIA（Tk 进程内调 UIA 必死锁），管道行协议回传
         self._nproc = None
+        threading.Thread(target=check_update, args=(self.events,),
+                         daemon=True).start()
         if CUIAutomation:
             cmd = [sys.executable] + ([] if getattr(sys, 'frozen', False)
                                        else [str(Path(__file__).resolve())]) + ['--notify']
@@ -925,6 +996,7 @@ class Pet:
         self.c_day = tk.Label(head, bg='#ededf0', fg=DIM, font=hf,
                               width=8, anchor='e')  # 今日流量 Σ
         self.c_day.pack(side='right')
+        self.c_day.bind('<Button-1>', lambda e: (self._show_traffic_hist(), 'break')[1])
 
         sysf = tk.Frame(r, bg=BG)
         sysf.pack(fill='x', padx=12, pady=(12, 6))
@@ -933,10 +1005,14 @@ class Pet:
         self.g_mem = Gauge(sysf, '内存', 1, 0, f)
         self.g_vram = Gauge(sysf, '显存', 1, 3, f)
         self.g_dsk = Gauge(sysf, 'C盘', 2, 0, f)
+        self.g_gput = Gauge(sysf, '温度', 2, 3, f)  # GPU 温度（无 N 卡显示 —）
         for g, kind in ((self.g_cpu, 'CPU'), (self.g_mem, '内存')):
             for wgt in (g.cv, g.val):  # 点击仪表弹 Top 进程；'break' 防触发拖窗
                 wgt.bind('<Button-1>', lambda e, k=kind:
                          (self.show_top(k), 'break')[1])
+        for wgt in (self.g_dsk.cv, self.g_dsk.val, self.g_dsk.name_lb):
+            wgt.bind('<Button-1>', lambda e: (self._next_disk(), 'break')[1])
+        self._dsk_i = 0
         self.ai_f = tk.Frame(r, bg=BG)  # AI 用量行独立紧凑布局，不受仪表列宽影响
         self.ai_f.pack(fill='x', padx=12, pady=(8, 2))
 
@@ -1110,19 +1186,22 @@ class Pet:
     def tick(self):
         cpu = psutil.cpu_percent()
         mem = psutil.virtual_memory().percent
-        du = shutil.disk_usage('C:\\')
+        disk = self._cur_disk()  # 点击仪表可循环切换盘符
+        du = shutil.disk_usage(disk)
         dsk = 100 * du.used / du.total
+        self.g_dsk.name_lb.config(text=f'{disk[0]}盘')
         io, t = psutil.net_io_counters(), time.time()
         dt = t - self._t
         down = (io.bytes_recv - self._io.bytes_recv) / dt if self._io else 0
         up = (io.bytes_sent - self._io.bytes_sent) / dt if self._io else 0
-        if self._io:  # 累计用精确字节增量；负跳变=网卡计数重置/重连，按 0 计
-            self._tr['down'] += max(0, io.bytes_recv - self._io.bytes_recv)
-            self._tr['up'] += max(0, io.bytes_sent - self._io.bytes_sent)
         self._io, self._t = io, t
-        today = time.strftime('%Y-%m-%d')  # 跨日清零
-        if self._tr['date'] != today:
-            self._tr = {'date': today, 'down': 0.0, 'up': 0.0}
+        today = time.strftime('%Y-%m-%d')
+        if self._tr['days'][-1]['date'] != today:  # 跨日：昨日记满归档，重开今日
+            self._tr = traffic_load()
+        cur = self._tr['days'][-1]
+        if self._io:  # 累计用精确字节增量；负跳变=网卡计数重置/重连，按 0 计
+            cur['down'] += max(0, io.bytes_recv - self._io.bytes_recv)
+            cur['up'] += max(0, io.bytes_sent - self._io.bytes_sent)
         self._tr_tick += 1
         if self._tr_tick >= 300:  # 每 5 分钟落盘一次
             self._tr_tick = 0
@@ -1131,11 +1210,14 @@ class Pet:
         self.g_cpu.set(cpu, mood(cpu))
         self.g_mem.set(mem, mood(mem))
         self.g_dsk.set(dsk, mood(dsk))
-        gu, gv = self.gpu_state['gpu']
+        gu, gv, gt = self.gpu_state['gpu']
         self.g_gpu.set(gu, mood(gu) if gu is not None else FG)
         self.g_vram.set(gv, mood(gv) if gv is not None else FG)
+        self.g_gput.set(gt, mood(gt - 15) if gt is not None else FG, unit='°')
+        self._alert_sys('CPU', cpu, 90)
+        self._alert_sys(f'{disk[0]}盘', dsk, 95)
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
-        self.c_day.config(text=f'Σ {size(self._tr["down"] + self._tr["up"])}')
+        self.c_day.config(text=f'Σ {size(cur["down"] + cur["up"])}')
         self.c_net.config(text=f'↓ {speed(down)} ↑ {speed(up)}')
         self._render_ai()
 
@@ -1162,6 +1244,36 @@ class Pet:
         self._top = self.events[0] if self.events else None
         self._shown = len(self.events)
         self.root.after(1000, self.tick)
+
+    def _alert_sys(self, what, pct, th):
+        """系统指标告警（滞回：越线报一次，回落 th-5 以下重新武装）"""
+        if pct >= th and what not in self._armed:
+            self._armed.add(what)
+            msg = f'{what} {pct:.0f}%（阈值 {th}%）'
+            push_event(self.events, time.strftime('%H:%M:%S'), '告警',
+                       msg, None, None, '')
+            toast('SysPet 告警', msg)
+        elif pct < th - 5:
+            self._armed.discard(what)
+
+    def _next_disk(self):
+        self._dsk_i += 1
+        self.tick()  # 立即刷新所选项
+
+    def _cur_disk(self):
+        ds = drives()
+        return ds[self._dsk_i % len(ds)] if ds else 'C:\\'
+
+    def _show_traffic_hist(self):
+        """点击 Σ：显示最近 3 天流量（昨日向前）"""
+        ds = self._tr['days'][-4:-1]
+        if not ds:
+            self._flash('暂无历史流量记录')
+            return
+        txt = ' · '.join(f"{d['date'][5:]} ↓{size(d['down'])} ↑{size(d['up'])}"
+                         for d in reversed(ds))
+        self.hint.config(text=txt, fg=DIM)
+        self.root.after(4000, lambda: self.hint.config(text=HINT, fg=DIM))
 
     def _show_empty(self):
         """事件流空态提示（craft-floor：空状态是必做状态）"""
@@ -1201,10 +1313,14 @@ class Pet:
         i = self._line_ev(e)
         if i is not None:
             if self.events[i][1] == '通知':
-                try:
-                    os.startfile('ms-actioncenter:')
-                except OSError:
-                    self._flash('无法打开通知中心')
+                p = self.events[i][5]
+                if p.startswith('http'):
+                    webbrowser.open(p)  # 更新提示等带链接的通知
+                else:
+                    try:
+                        os.startfile('ms-actioncenter:')
+                    except OSError:
+                        self._flash('无法打开通知中心')
                 return 'break'
             p = self.events[i][5]
             if os.path.exists(p):

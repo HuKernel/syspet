@@ -83,8 +83,9 @@ try:
     syspet.cfg_update(pos='10,20')
     _c = json.loads(_up.read_text('utf-8'))
     assert _c['pos'] == '10,20' and _c['only'] == ['d:\\x']  # 其余键保留
-    syspet.cfg_update(traffic={'date': time.strftime('%Y-%m-%d'), 'down': 1024, 'up': 512})
-    assert traffic_load()['down'] == 1024 and traffic_load()['up'] == 512
+    syspet.cfg_update(traffic={'days': [{'date': time.strftime('%Y-%m-%d'), 'down': 1024, 'up': 512}]})
+    assert traffic_load()['days'][-1]['down'] == 1024
+    assert traffic_load()['days'][-1]['up'] == 512
 finally:
     _up.unlink()
     syspet.CFG_AI = syspet.BASE.with_suffix('.json')
