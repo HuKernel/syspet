@@ -49,6 +49,8 @@ ver = sys.argv[1] if len(sys.argv) > 1 else sh('python', '-c',
 tag = f'v{ver}'
 exe = os.path.join('dist', 'syspet.exe')
 assert os.path.exists(exe), '先打包: pyinstaller --onefile --noconsole --icon=syspet.ico ...'
+assert os.path.getmtime(exe) > os.path.getmtime('syspet.py'), \
+    'dist/syspet.exe 比 syspet.py 旧——构建失败或漏打包（exe 可能被占用），勿发布旧版'
 
 token = dict(l.split('=', 1) for l in sh('git', 'credential', 'fill',
               inp='protocol=https\nhost=github.com\n\n').splitlines() if '=' in l)['password']
