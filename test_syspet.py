@@ -86,6 +86,24 @@ try:
     syspet.cfg_update(traffic={'days': [{'date': time.strftime('%Y-%m-%d'), 'down': 1024, 'up': 512}]})
     assert traffic_load()['days'][-1]['down'] == 1024
     assert traffic_load()['days'][-1]['up'] == 512
+
+# 回归：tick 流量累计必须真实增长（v2.1.0 曾因先更新 self._io 后算差值而恒 0）
+import collections
+import tkinter as tk
+import psutil
+_orig_io = psutil.net_io_counters
+_fake = [collections.namedtuple('IO', 'bytes_recv bytes_sent')(1000, 500),
+         collections.namedtuple('IO', 'bytes_recv bytes_sent')(5000, 900)]
+psutil.net_io_counters = lambda: _fake.pop(0)
+_p = syspet.Pet()
+_p.tick(); _p.tick()
+assert _p._tr['days'][-1]['down'] == 4000, _p._tr  # 1000→5000 差值被累计
+assert _p._tr['days'][-1]['up'] == 400, _p._tr
+if _p._nproc:
+    _p._nproc.terminate()
+_p.root.destroy()
+psutil.net_io_counters = _orig_io
+print('tick 流量累计回归测试通过')
 finally:
     _up.unlink()
     syspet.CFG_AI = syspet.BASE.with_suffix('.json')

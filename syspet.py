@@ -1239,7 +1239,6 @@ class Pet:
         dt = t - self._t
         down = (io.bytes_recv - self._io.bytes_recv) / dt if self._io else 0
         up = (io.bytes_sent - self._io.bytes_sent) / dt if self._io else 0
-        self._io, self._t = io, t
         today = time.strftime('%Y-%m-%d')
         if self._tr['days'][-1]['date'] != today:  # 跨日：昨日记满归档，重开今日
             self._tr = traffic_load()
@@ -1247,6 +1246,7 @@ class Pet:
         if self._io:  # 累计用精确字节增量；负跳变=网卡计数重置/重连，按 0 计
             cur['down'] += max(0, io.bytes_recv - self._io.bytes_recv)
             cur['up'] += max(0, io.bytes_sent - self._io.bytes_sent)
+        self._io, self._t = io, t  # 必须在累计之后更新，否则差值恒 0（v2.1.0 引入的 bug）
         self._tr_tick += 1
         if self._tr_tick >= 300:  # 每 5 分钟落盘一次
             self._tr_tick = 0
