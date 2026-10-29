@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.7.7'
+__version__ = '1.8.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -121,7 +121,7 @@ class Gauge:
                             highlightthickness=0, bd=0)
         self.cv.grid(row=row, column=col + 1, padx=(2, 5))
         self.val = tk.Label(parent, text='—', bg=BG, fg=FG,
-                            font=('Consolas', 10),  # 等宽数字，数值变化不抖动
+                            font=('Consolas', 10, 'bold'),  # 测量值：等宽+粗，强调来自字重
                             width=4, anchor='e')
         self.val.grid(row=row, column=col + 2, sticky='e')
 
@@ -903,10 +903,11 @@ class Pet:
         r.overrideredirect(True)
         r.attributes('-topmost', True, '-alpha', 0.88)
         r.configure(bg=BG)
-        f, e_f = ('Microsoft YaHei UI', 9), ('Consolas', 9)  # 标签雅黑，数据等宽
+        # 等宽只用于测量值；标签/路径/文案用正文字体（去"技术戏服"感）
+        f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
 
         head = tk.Frame(r, bg='#141416')
-        head.pack(fill='x', ipady=4)
+        head.pack(fill='x', ipady=3)
         tk.Label(head, text='SysPet', bg='#141416', fg=ACCENT,
                  font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 4))
         hf = ('Consolas', 9)
@@ -921,7 +922,7 @@ class Pet:
         self.c_day.pack(side='right')
 
         sysf = tk.Frame(r, bg=BG)
-        sysf.pack(fill='x', padx=10, pady=(6, 2))
+        sysf.pack(fill='x', padx=12, pady=(12, 6))
         self.g_cpu = Gauge(sysf, 'CPU', 0, 0, f)
         self.g_gpu = Gauge(sysf, 'GPU', 0, 3, f)
         self.g_mem = Gauge(sysf, '内存', 1, 0, f)
@@ -932,14 +933,15 @@ class Pet:
                 wgt.bind('<Button-1>', lambda e, k=kind:
                          (self.show_top(k), 'break')[1])
         self.ai_f = tk.Frame(r, bg=BG)  # AI 用量行独立紧凑布局，不受仪表列宽影响
-        self.ai_f.pack(fill='x', padx=10, pady=(2, 0))
+        self.ai_f.pack(fill='x', padx=12, pady=(8, 2))
 
-        tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=10, pady=(2, 4))
-        self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=4, width=38,
+        tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=12, pady=(8, 10))
+        self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=5, width=38,
                            highlightthickness=0, wrap='none', spacing1=2, spacing3=2,
                            state='disabled', cursor='arrow')
-        self.txt.pack(fill='both', expand=True, padx=10)
-        self.txt.tag_config('ts', foreground=DIM)
+        self.txt.pack(fill='both', expand=True, padx=12)
+        self.txt.tag_config('ts', foreground=DIM, font=('Consolas', 9))  # 时间=测量值
+        self.txt.tag_config('mono', font=('Consolas', 9))                # 大小=测量值
         self.txt.tag_config('ext', foreground='#56c8b0')
         for t, c in (('新增', '#5ad478'), ('删除', '#f0635f'),
                      ('修改', '#f2c14e'), ('改名', '#61a5f2'),
@@ -957,7 +959,7 @@ class Pet:
 
         self.hint = tk.Label(r, bg=BG, fg=DIM, font=('Microsoft YaHei UI', 8),
                              anchor='w', width=40, text=HINT)
-        self.hint.pack(fill='x', padx=12, pady=(2, 6))
+        self.hint.pack(fill='x', padx=14, pady=(4, 10))
 
         menu = tk.Menu(r, tearoff=0)
         menu.add_command(label='配置 AI 供应商…', command=self._cfg_ai)
@@ -1092,7 +1094,7 @@ class Pet:
         t.insert('1.0', '  ', 'ev')                            #        缩进
         t.insert('1.0', '\n')                                  # 摘要→路径换行
         t.insert('1.0', '' if tag in ('通知', '告警') else f'  {size(old)} → {size(new)}',
-                 'ev')                                         # 摘要行: 大小（通知/告警无）
+                 ('mono', 'ev'))                                      # 摘要行: 大小（通知/告警无）
         t.insert('1.0', f'{tag} ', (f't-{tag}', 'ev'))         #        类型
         t.insert('1.0', f'{ts} ', ('ts', 'ev'))                #        时间
         if int(t.index('end-1c').split('.')[0]) > KEEP * 2:
@@ -1162,7 +1164,7 @@ class Pet:
                          font=('Microsoft YaHei UI', 9), anchor='w')
             n.pack(side='left')
             v = tk.Label(row, text=val or '查询失败', bg=BG, fg=FG,
-                         font=('Consolas', 9), anchor='w')
+                         font=('Microsoft YaHei UI', 9), anchor='w')
             v.pack(side='left', fill='x', expand=True, padx=(8, 0))  # 拉满剩余宽度
             self._ai_rows += [row]
 
