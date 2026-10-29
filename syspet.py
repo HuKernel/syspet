@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.7.6'
+__version__ = '1.7.7'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -69,7 +69,7 @@ def setup_log():
         '线程异常', exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 
 KEEP = 200
-HINT = '点事件打开 · 点CPU/内存看进程 · 滚轮翻看 · 拖动 · 右键'
+HINT = '点事件打开 · 点CPU/内存看进程 · 右键'
 BG, FG, DIM = '#1c1c1e', '#f2f2f2', '#98989d'
 TRACK, ACCENT = '#3a3a3c', '#4aa3ff'
 TAG_CN = {1: '新增', 2: '删除', 3: '修改', 4: '改名'}
@@ -112,7 +112,7 @@ def mood(pct):
 
 class Gauge:
     """名称 + 圆角进度条 + 数值 三列仪表，col 为起始列（双列布局）"""
-    W, H, R = 110, 9, 3
+    W, H, R = 95, 9, 3
 
     def __init__(self, parent, name, row, col, font):
         tk.Label(parent, text=name, bg=BG, fg=DIM, font=font, width=4,
@@ -908,19 +908,16 @@ class Pet:
         head = tk.Frame(r, bg='#141416')
         head.pack(fill='x', ipady=4)
         tk.Label(head, text='SysPet', bg='#141416', fg=ACCENT,
-                 font=('Microsoft YaHei UI', 10, 'bold')).pack(side='left', padx=(12, 6))
+                 font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 4))
         hf = ('Consolas', 9)
-        self.c_down = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w',
-                               width=11)  # 定宽=最长文本 '↓ 1023 KB/s'，防抖且不撑宽
-        self.c_down.pack(side='left')
-        self.c_up = tk.Label(head, bg='#141416', fg=DIM, font=hf, anchor='w',
-                             width=11)
-        self.c_up.pack(side='left', padx=(6, 0))
+        self.c_net = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w',
+                              width=19)  # 上下行合并；峰值 '↓ 1023 KB ↑ 1023 KB'
+        self.c_net.pack(side='left')
         self.c_clk = tk.Label(head, bg='#141416', fg=DIM, font=hf,
                               width=8, anchor='e')
         self.c_clk.pack(side='right', padx=(0, 10))
         self.c_day = tk.Label(head, bg='#141416', fg=DIM, font=hf,
-                              width=9, anchor='e')  # 今日流量 Σ，最长 'Σ 1023 GB'
+                              width=8, anchor='e')  # 今日流量 Σ
         self.c_day.pack(side='right')
 
         sysf = tk.Frame(r, bg=BG)
@@ -938,7 +935,7 @@ class Pet:
         self.ai_f.pack(fill='x', padx=10, pady=(2, 0))
 
         tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=10, pady=(2, 4))
-        self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=4, width=42,
+        self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=4, width=38,
                            highlightthickness=0, wrap='none', spacing1=2, spacing3=2,
                            state='disabled', cursor='arrow')
         self.txt.pack(fill='both', expand=True, padx=10)
@@ -959,7 +956,7 @@ class Pet:
         self.ev_menu.add_command(label='在文件夹中显示', command=lambda: self._launch('show'))
 
         self.hint = tk.Label(r, bg=BG, fg=DIM, font=('Microsoft YaHei UI', 8),
-                             anchor='w', width=44, text=HINT)
+                             anchor='w', width=40, text=HINT)
         self.hint.pack(fill='x', padx=12, pady=(2, 6))
 
         menu = tk.Menu(r, tearoff=0)
@@ -1060,8 +1057,7 @@ class Pet:
         self.g_vram.set(gv, mood(gv) if gv is not None else FG)
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
         self.c_day.config(text=f'Σ {size(self._tr["down"] + self._tr["up"])}')
-        self.c_down.config(text=f'↓ {speed(down)}')
-        self.c_up.config(text=f'↑ {speed(up)}')
+        self.c_net.config(text=f'↓ {speed(down)} ↑ {speed(up)}')
         self._render_ai()
 
         delta = len(self.events) - self._shown
