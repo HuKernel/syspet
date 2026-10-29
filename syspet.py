@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.9.1'
+__version__ = '2.0.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -70,8 +70,8 @@ def setup_log():
 
 KEEP = 200
 HINT = '点事件打开 · 拖到屏幕边缘隐藏 · 右键'
-BG, FG, DIM = '#1c1c1e', '#f2f2f2', '#98989d'
-TRACK, ACCENT = '#3a3a3c', '#4aa3ff'
+BG, FG, DIM = '#f7f7f9', '#1d1d1f', '#86868b'
+TRACK, ACCENT = '#e3e3e8', '#007aff'
 TAG_CN = {1: '新增', 2: '删除', 3: '修改', 4: '改名'}
 NOTIFY_MASK = (win32con.FILE_NOTIFY_CHANGE_FILE_NAME
                | win32con.FILE_NOTIFY_CHANGE_LAST_WRITE
@@ -107,7 +107,7 @@ def speed(b):
 
 
 def mood(pct):
-    return '#5ad478' if pct < 60 else '#f2c14e' if pct < 90 else '#f0635f'
+    return '#34c759' if pct < 60 else '#ff9500' if pct < 90 else '#ff3b30'
 
 
 class Gauge:
@@ -687,9 +687,9 @@ def ev_text(ev):
 
 
 class AICfg(tk.Toplevel):
-    """AI 供应商配置窗口：深色紧凑风（与主悬浮窗同主题），保存写 syspet.json"""
-    WBG, WFG, DIM, LINE, ACC = '#1c1c1e', '#f2f2f2', '#98989d', '#3a3a3c', '#4aa3ff'
-    CARD = '#26262a'
+    """AI 供应商配置窗口：浅色精致风（与主悬浮窗同主题），保存写 syspet.json"""
+    WBG, WFG, DIM, LINE, ACC = '#f0f0f3', '#1d1d1f', '#86868b', '#d8d8dc', '#007aff'
+    CARD = '#ffffff'
 
     def __init__(self, master):
         super().__init__(master)
@@ -714,13 +714,13 @@ class AICfg(tk.Toplevel):
         self.lb = tk.Listbox(c1, bg=self.CARD, fg=self.WFG, bd=0, width=48, height=3,
                              font=(F, 10), highlightthickness=1,
                              highlightbackground=self.LINE, highlightcolor=self.ACC,
-                             selectbackground='#2d5a8e', selectforeground='#ffffff',
+                             selectbackground='#cce4ff', selectforeground='#1d1d1f',
                              activestyle='none', exportselection=False)
         self.lb.pack(fill='x', padx=10, pady=(10, 5))
         self.lb.bind('<<ListboxSelect>>', self._pick)
-        btn2 = dict(bg='#333338', fg='#e0e0e4', activebackground='#42424a',
+        btn2 = dict(bg='#ffffff', fg='#3a3a3c', activebackground='#e8e8ec',
                     activeforeground=self.WFG, font=(F, 9), bd=0, padx=14, pady=4,
-                    cursor='hand2', highlightthickness=1, highlightbackground='#5a5a62')
+                    cursor='hand2', highlightthickness=1, highlightbackground='#c8c8cd')
         brow = tk.Frame(c1, bg=self.CARD)
         brow.pack(fill='x', padx=10, pady=(0, 10))
         tk.Button(brow, text='＋ 新增', command=self._add, **btn2).pack(side='left')
@@ -743,7 +743,7 @@ class AICfg(tk.Toplevel):
                                text='密钥经 Windows DPAPI 加密存储，仅本机当前用户可解')
         self.status.pack(side='left', fill='x', expand=True)
         tk.Button(bot, text='保存并关闭', command=self._save, bg=self.ACC, fg='#ffffff',
-                  activebackground='#3d8fe0', activeforeground='#ffffff',
+                  activebackground='#0069d9', activeforeground='#ffffff',
                   font=(F, 10, 'bold'), bd=0, padx=18, pady=5,
                   cursor='hand2').pack(side='right')
         self._refresh()
@@ -757,7 +757,7 @@ class AICfg(tk.Toplevel):
     def _field(self, parent, label, f, secret=False):
         tk.Label(parent, text=label, bg=self.CARD, fg=self.DIM, font=(f, 9)
                  ).pack(anchor='w', padx=10, pady=(8, 2))
-        e = tk.Entry(parent, bg='#1c1c1e', fg=self.WFG, bd=0, width=44, font=(f, 10),
+        e = tk.Entry(parent, bg='#f7f7f9', fg=self.WFG, bd=0, width=44, font=(f, 10),
                      insertbackground=self.WFG, show='●' if secret else '',
                      highlightthickness=1, highlightbackground=self.LINE,
                      highlightcolor=self.ACC)  # 聚焦时边框变蓝
@@ -825,7 +825,7 @@ class AICfg(tk.Toplevel):
             else:
                 r = test_provider(url, key, tok)
             self.after(0, lambda: (self.status.config(
-                text=r, fg='#5ad478' if r.startswith(('连接', '余')) else '#ff6b66'),
+                text=r, fg='#34c759' if r.startswith(('连接', '余')) else '#ff3b30'),
                 self.btn_test.config(state='normal')))
         threading.Thread(target=run, daemon=True).start()
 
@@ -834,15 +834,15 @@ class AICfg(tk.Toplevel):
         for p in self.provs:
             if not (p['name'] and p['url'].startswith('http') and p['key']):
                 self.status.config(text='有条目未填全（名称 / 地址需 http 开头 / Key）',
-                                   fg='#ff6b66')
+                                   fg='#ff3b30')
                 return
             if bool(p.get('token')) != bool(p.get('uid')):
                 self.status.config(text='「访问令牌」与「用户 UID」需同时填写（或都留空）',
-                                   fg='#ff6b66')
+                                   fg='#ff3b30')
                 return
         alert = self.e_alert.get().strip()
         if not (alert.isdigit() and int(alert) <= 100):
-            self.status.config(text='告警阈值需为 0-100 的整数', fg='#ff6b66')
+            self.status.config(text='告警阈值需为 0-100 的整数', fg='#ff3b30')
             return
         try:
             cfg = json.loads(CFG_AI.read_text('utf-8'))
@@ -906,23 +906,23 @@ class Pet:
         r = self.root = tk.Tk()
         r.report_callback_exception = lambda *a: log.error('UI 回调异常', exc_info=a)
         r.overrideredirect(True)
-        r.attributes('-topmost', True, '-alpha', 0.55)  # 常驻半透明不挡视线，悬停恢复
+        r.attributes('-topmost', True, '-alpha', 0.72)  # 浅色半透明，悬停恢复
         r.configure(bg=BG)
         # 等宽只用于测量值；标签/路径/文案用正文字体（去"技术戏服"感）
         f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
 
-        head = tk.Frame(r, bg='#141416')
+        head = tk.Frame(r, bg='#ededf0')
         head.pack(fill='x', ipady=3)
-        tk.Label(head, text='SysPet', bg='#141416', fg=DIM,
+        tk.Label(head, text='SysPet', bg='#ededf0', fg=DIM,
                  font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 4))
         hf = ('Consolas', 9)
-        self.c_net = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w',
+        self.c_net = tk.Label(head, bg='#ededf0', fg=FG, font=hf, anchor='w',
                               width=19)  # 上下行合并；峰值 '↓ 1023 KB ↑ 1023 KB'
         self.c_net.pack(side='left')
-        self.c_clk = tk.Label(head, bg='#141416', fg=DIM, font=hf,
+        self.c_clk = tk.Label(head, bg='#ededf0', fg=DIM, font=hf,
                               width=8, anchor='e')
         self.c_clk.pack(side='right', padx=(0, 10))
-        self.c_day = tk.Label(head, bg='#141416', fg=DIM, font=hf,
+        self.c_day = tk.Label(head, bg='#ededf0', fg=DIM, font=hf,
                               width=8, anchor='e')  # 今日流量 Σ
         self.c_day.pack(side='right')
 
@@ -932,7 +932,7 @@ class Pet:
         self.g_gpu = Gauge(sysf, 'GPU', 0, 3, f)
         self.g_mem = Gauge(sysf, '内存', 1, 0, f)
         self.g_vram = Gauge(sysf, '显存', 1, 3, f)
-        self.g_dsk = Gauge(sysf, 'C盘', 2, 0, f, full=True)  # 末行跨两列拉满
+        self.g_dsk = Gauge(sysf, 'C盘', 2, 0, f)
         for g, kind in ((self.g_cpu, 'CPU'), (self.g_mem, '内存')):
             for wgt in (g.cv, g.val):  # 点击仪表弹 Top 进程；'break' 防触发拖窗
                 wgt.bind('<Button-1>', lambda e, k=kind:
@@ -947,12 +947,12 @@ class Pet:
         self.txt.pack(fill='both', expand=True, padx=12)
         self.txt.tag_config('ts', foreground=DIM, font=('Consolas', 9))  # 时间=测量值
         self.txt.tag_config('mono', font=('Consolas', 9))                # 大小=测量值
-        self.txt.tag_config('empty', foreground='#6a6a70')
+        self.txt.tag_config('empty', foreground='#b0b0b5')
         self._show_empty()
-        self.txt.tag_config('ext', foreground='#56c8b0')
-        for t, c in (('新增', '#5ad478'), ('删除', '#f0635f'),
-                     ('修改', '#f2c14e'), ('改名', '#61a5f2'),
-                     ('通知', '#c39bef'), ('告警', '#ff6b66')):
+        self.txt.tag_config('ext', foreground='#00a19b')
+        for t, c in (('新增', '#34c759'), ('删除', '#ff3b30'),
+                     ('修改', '#c9860a'), ('改名', '#5856d6'),
+                     ('通知', '#af52de'), ('告警', '#ff3b30')):
             self.txt.tag_config(f't-{t}', foreground=c)
         for t in ('ts', 'ev', 'ext', 't-新增', 't-删除', 't-修改', 't-改名',
                   't-通知', 't-告警'):
@@ -1068,12 +1068,12 @@ class Pet:
         w = tk.Toplevel(self.root)
         w.overrideredirect(True)
         w.attributes('-topmost', True)
-        w.configure(bg='#141416')
-        tk.Label(w, text=f'{kind} Top 5（点击关闭）', bg='#141416', fg=ACCENT,
+        w.configure(bg='#ededf0')
+        tk.Label(w, text=f'{kind} Top 5（点击关闭）', bg='#ededf0', fg=ACCENT,
                  font=('Microsoft YaHei UI', 9, 'bold'), anchor='w',
                  padx=10).pack(fill='x', pady=(6, 2))
         for name, v in rows:
-            tk.Label(w, text=f'{name[:24]:24s} {v:5.1f}%', bg='#141416', fg=FG,
+            tk.Label(w, text=f'{name[:24]:24s} {v:5.1f}%', bg='#ededf0', fg=FG,
                      font=('Consolas', 9), anchor='w', padx=10).pack(fill='x')
         w.bind('<Button-1>', lambda e: w.destroy())
         w.update_idletasks()
@@ -1089,14 +1089,14 @@ class Pet:
                 if self._edge_timer:
                     self.root.after_cancel(self._edge_timer)
                 self._edge_back()
-            self.root.attributes('-alpha', 0.97)
+            self.root.attributes('-alpha', 1.0)
             return
         x, y = self.root.winfo_pointerxy()
         fx, fy = self.root.winfo_rootx(), self.root.winfo_rooty()
         if (fx <= x < fx + self.root.winfo_width()
                 and fy <= y < fy + self.root.winfo_height()):
             return
-        self.root.attributes('-alpha', 0.55)
+        self.root.attributes('-alpha', 0.72)
         if getattr(self, '_edge', None) and not self._hidden:
             self._hidden = True  # 离开 800ms 后再滑出，防抖动误触
             self._edge_timer = self.root.after(800, self._edge_out)
@@ -1268,7 +1268,7 @@ class Pet:
             self._flash('已' + ('开启' if on else '关闭') + '开机自启动')
 
     def _flash(self, msg):
-        self.hint.config(text=msg, fg='#f0635f')
+        self.hint.config(text=msg, fg='#ff3b30')
         self.root.after(2000, lambda: self.hint.config(text=HINT, fg=DIM))
 
 
