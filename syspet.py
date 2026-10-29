@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.1.1'
+__version__ = '2.1.2'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -1186,10 +1186,7 @@ class Pet:
     def tick(self):
         cpu = psutil.cpu_percent()
         mem = psutil.virtual_memory().percent
-        disk = self._cur_disk()  # 点击仪表可循环切换盘符
-        du = shutil.disk_usage(disk)
-        dsk = 100 * du.used / du.total
-        self.g_dsk.name_lb.config(text=f'{disk[0]}盘')
+        dsk = self._refresh_disk()
         io, t = psutil.net_io_counters(), time.time()
         dt = t - self._t
         down = (io.bytes_recv - self._io.bytes_recv) / dt if self._io else 0
@@ -1217,7 +1214,6 @@ class Pet:
         gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
         self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
-        self._alert_sys(f'{disk[0]}盘', dsk, 95)
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
         self.c_day.config(text=f'Σ {size(cur["down"] + cur["up"])}')
         self.c_net.config(text=f'↓ {speed(down)} ↑ {speed(up)}')
@@ -1258,9 +1254,19 @@ class Pet:
         elif pct < th - 5:
             self._armed.discard(what)
 
+    def _refresh_disk(self):
+        """当前盘占用% 并更新标签与磁盘告警（tick 与点击切换共用）"""
+        disk = self._cur_disk()
+        du = shutil.disk_usage(disk)
+        dsk = 100 * du.used / du.total
+        self.g_dsk.name_lb.config(text=f'{disk[0]}盘')
+        self._alert_sys(f'{disk[0]}盘', dsk, 95)
+        return dsk
+
     def _next_disk(self):
         self._dsk_i += 1
-        self.tick()  # 立即刷新所选项
+        dsk = self._refresh_disk()  # 只刷磁盘，勿调 tick：tick 每跑一遍会再排定时器
+        self.g_dsk.set(dsk, mood(dsk))
 
     def _cur_disk(self):
         ds = drives()
