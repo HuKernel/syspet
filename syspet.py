@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.3.2'
+__version__ = '2.3.3'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -1025,7 +1025,9 @@ class Pet:
         head = tk.Frame(r, bg='#ededf0')
         head.pack(fill='x', ipady=3)
         tk.Label(head, text='SysPet', bg='#ededf0', fg=DIM,
-                 font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 4))
+                 font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 2))
+        tk.Label(head, text=f'v{__version__}', bg='#ededf0', fg=DIM,
+                 font=('Consolas', 8)).pack(side='left')
         hf = ('Consolas', 9)
         self.c_net = tk.Label(head, bg='#ededf0', fg=FG, font=hf, anchor='w',
                               width=19)  # 上下行合并；峰值 '↓ 1023 KB ↑ 1023 KB'
@@ -1085,6 +1087,8 @@ class Pet:
         self.hint.pack(fill='x', padx=14, pady=(4, 10))
 
         menu = tk.Menu(r, tearoff=0)
+        menu.add_command(label=f'SysPet v{__version__}', state='disabled')
+        menu.add_separator()
         menu.add_command(label='设置…', command=self._cfg_ai)
         self.auto_var = tk.BooleanVar(value=autostart_enabled())
         menu.add_checkbutton(label='开机自启动', variable=self.auto_var,
