@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.7.4'
+__version__ = '1.7.5'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -112,7 +112,7 @@ def mood(pct):
 
 class Gauge:
     """名称 + 圆角进度条 + 数值 三列仪表，col 为起始列（双列布局）"""
-    W, H, R = 62, 9, 3
+    W, H, R = 110, 9, 3
 
     def __init__(self, parent, name, row, col, font):
         tk.Label(parent, text=name, bg=BG, fg=DIM, font=font, width=4,
@@ -1165,9 +1165,9 @@ class Pet:
             n = tk.Label(row, text=f'{name[:6]}', bg=BG, fg=DIM, width=7,
                          font=('Microsoft YaHei UI', 9), anchor='w')
             n.pack(side='left')
-            v = tk.Label(row, text=val or '查询失败', bg=BG, fg=FG, width=36,
+            v = tk.Label(row, text=val or '查询失败', bg=BG, fg=FG,
                          font=('Consolas', 9), anchor='w')
-            v.pack(side='left', padx=(8, 0))
+            v.pack(side='left', fill='x', expand=True, padx=(8, 0))  # 拉满剩余宽度
             self._ai_rows += [row]
 
     def _cfg_ai(self):
