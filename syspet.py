@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.0.0'
+__version__ = '2.0.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -1116,12 +1116,13 @@ class Pet:
         dt = t - self._t
         down = (io.bytes_recv - self._io.bytes_recv) / dt if self._io else 0
         up = (io.bytes_sent - self._io.bytes_sent) / dt if self._io else 0
+        if self._io:  # 累计用精确字节增量；负跳变=网卡计数重置/重连，按 0 计
+            self._tr['down'] += max(0, io.bytes_recv - self._io.bytes_recv)
+            self._tr['up'] += max(0, io.bytes_sent - self._io.bytes_sent)
         self._io, self._t = io, t
         today = time.strftime('%Y-%m-%d')  # 跨日清零
         if self._tr['date'] != today:
             self._tr = {'date': today, 'down': 0.0, 'up': 0.0}
-        self._tr['down'] += down
-        self._tr['up'] += up
         self._tr_tick += 1
         if self._tr_tick >= 300:  # 每 5 分钟落盘一次
             self._tr_tick = 0
