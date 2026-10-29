@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.1.0'
+__version__ = '2.1.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -1213,7 +1213,9 @@ class Pet:
         gu, gv, gt = self.gpu_state['gpu']
         self.g_gpu.set(gu, mood(gu) if gu is not None else FG)
         self.g_vram.set(gv, mood(gv) if gv is not None else FG)
-        self.g_gput.set(gt, mood(gt - 15) if gt is not None else FG, unit='°')
+        # 温度色阶独立于负载：60℃ 以下绿 / 80℃ 以上红
+        gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
+        self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
         self._alert_sys(f'{disk[0]}盘', dsk, 95)
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
