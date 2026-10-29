@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.2.0'
+__version__ = '2.3.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -761,7 +761,7 @@ class AICfg(tk.Toplevel):
 
     def __init__(self, master):
         super().__init__(master)
-        self.title('AI 供应商配置')
+        self.title('SysPet 设置')
         self.configure(bg=self.WBG)
         try:
             cfg = json.loads(CFG_AI.read_text('utf-8'))
@@ -800,12 +800,19 @@ class AICfg(tk.Toplevel):
         self.e_key = self._field(c2, 'Key', F, secret=True)          # 凭据框 ● 遮罩
         self.e_token = self._field(c2, '访问令牌（可选）', F, secret=True)
         self.e_uid = self._field(c2, '用户 UID（可选，需与令牌同时填）', F)
-        self.e_alert = self._field(c2, '用量告警阈值 %（0=禁用，默认 90）', F)
-        self.e_alert.insert(0, cfg.get('ai_alert', 90))
-        self.e_rest = self._field(c2, '久坐提醒间隔分钟（0=禁用，默认 45）', F)
-        self.e_rest.insert(0, cfg.get('rest', 45))
         self.btn_test = tk.Button(c2, text='测试连接', command=self._test, **btn2)
         self.btn_test.pack(anchor='w', padx=10, pady=(8, 10))
+
+        c3 = self._card()
+        tk.Label(c3, text='通用设置', bg=self.CARD, fg=self.WFG,
+                 font=(F, 10, 'bold'), anchor='w',
+                 padx=10).pack(fill='x', pady=(10, 2))
+        self.e_alert = self._field(c3, '用量告警阈值 %（0=禁用，默认 90）', F)
+        self.e_alert.insert(0, cfg.get('ai_alert', 90))
+        self.e_rest = self._field(c3, '久坐提醒间隔分钟（0=禁用，默认 45）', F)
+        self.e_rest.insert(0, cfg.get('rest', 45))
+        self.e_alpha = self._field(c3, '待机透明度 %（5-95，默认 72；悬停恒清晰）', F)
+        self.e_alpha.insert(0, cfg.get('alpha', 72))
 
         bot = tk.Frame(self, bg=self.WBG)
         bot.pack(fill='x', padx=16, pady=(4, 12))
@@ -918,6 +925,10 @@ class AICfg(tk.Toplevel):
         if not (rest.isdigit() and int(rest) <= 480):
             self.status.config(text='久坐间隔需为 0-480 的整数', fg='#ff3b30')
             return
+        alpha = self.e_alpha.get().strip()
+        if not (alpha.isdigit() and 5 <= int(alpha) <= 95):
+            self.status.config(text='待机透明度需为 5-95 的整数', fg='#ff3b30')
+            return
         try:
             cfg = json.loads(CFG_AI.read_text('utf-8'))
         except (OSError, ValueError):
@@ -929,6 +940,7 @@ class AICfg(tk.Toplevel):
         cfg['providers'] = self.provs  # 只更新 providers，保留手写的 exclude/only
         cfg['ai_alert'] = int(alert)
         cfg['rest'] = int(rest)
+        cfg['alpha'] = int(alpha)
         CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
         log.info('AI 配置已保存，共 %d 个供应商', len(self.provs))
         self.destroy()  # 主窗后台线程 ≤5 秒内自动加载新配置
@@ -981,13 +993,14 @@ class Pet:
         _p = _cfg.get('providers', [])
         self._rest_min = int(_cfg.get('rest', 45) or 0)  # 久坐提醒间隔（分钟），0=禁用
         self._rest_n = 0
+        self._alpha = max(0.05, int(_cfg.get('alpha', 72) or 72) / 100)  # 待机透明度
         self.ai_state['rows'] = [(x.get('name', '?'), '…') for x in _p[:3]]
         self.ai_state['ver'] += 1
 
         r = self.root = tk.Tk()
         r.report_callback_exception = lambda *a: log.error('UI 回调异常', exc_info=a)
         r.overrideredirect(True)
-        r.attributes('-topmost', True, '-alpha', 0.72)  # 浅色半透明，悬停恢复
+        r.attributes('-topmost', True, '-alpha', self._alpha)  # 待机半透明，悬停恢复
         r.configure(bg=BG)
         # 等宽只用于测量值；标签/路径/文案用正文字体（去"技术戏服"感）
         f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
@@ -1055,7 +1068,7 @@ class Pet:
         self.hint.pack(fill='x', padx=14, pady=(4, 10))
 
         menu = tk.Menu(r, tearoff=0)
-        menu.add_command(label='配置 AI 供应商…', command=self._cfg_ai)
+        menu.add_command(label='设置…', command=self._cfg_ai)
         self.auto_var = tk.BooleanVar(value=autostart_enabled())
         menu.add_checkbutton(label='开机自启动', variable=self.auto_var,
                              command=self._toggle_autostart)
@@ -1182,7 +1195,7 @@ class Pet:
         if (fx <= x < fx + self.root.winfo_width()
                 and fy <= y < fy + self.root.winfo_height()):
             return
-        self.root.attributes('-alpha', 0.72)
+        self.root.attributes('-alpha', self._alpha)
         if getattr(self, '_edge', None) and not self._hidden:
             self._hidden = True  # 离开 800ms 后再滑出，防抖动误触
             self._edge_timer = self.root.after(800, self._edge_out)
