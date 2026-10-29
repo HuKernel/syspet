@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.7.1'
+__version__ = '1.7.2'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -683,8 +683,9 @@ def ev_text(ev):
 
 
 class AICfg(tk.Toplevel):
-    """AI 供应商配置窗口：亮色现代风（独立于主悬浮窗的深色桌宠主题），保存写 syspet.json"""
-    WBG, WFG, DIM, LINE, ACC = '#f8fafc', '#1e293b', '#64748b', '#e2e8f0', '#2563eb'
+    """AI 供应商配置窗口：深色紧凑风（与主悬浮窗同主题），保存写 syspet.json"""
+    WBG, WFG, DIM, LINE, ACC = '#1c1c1e', '#f2f2f2', '#98989d', '#3a3a3c', '#4aa3ff'
+    CARD = '#26262a'
 
     def __init__(self, master):
         super().__init__(master)
@@ -699,25 +700,25 @@ class AICfg(tk.Toplevel):
         F = 'Microsoft YaHei UI'
 
         top = tk.Frame(self, bg=self.WBG)
-        top.pack(fill='x', padx=20, pady=(16, 10))
+        top.pack(fill='x', padx=16, pady=(12, 6))
         tk.Label(top, text='AI 供应商', bg=self.WBG, fg=self.WFG,
                  font=(F, 13, 'bold')).pack(anchor='w')
         tk.Label(top, text='添加并管理你的 AI 平台密钥，保存后自动生效', bg=self.WBG,
                  fg=self.DIM, font=(F, 9)).pack(anchor='w', pady=(2, 0))
 
         c1 = self._card()
-        self.lb = tk.Listbox(c1, bg='#ffffff', fg=self.WFG, bd=0, width=48, height=4,
+        self.lb = tk.Listbox(c1, bg=self.CARD, fg=self.WFG, bd=0, width=48, height=3,
                              font=(F, 10), highlightthickness=1,
                              highlightbackground=self.LINE, highlightcolor=self.ACC,
-                             selectbackground='#dbeafe', selectforeground='#1e40af',
+                             selectbackground='#2d5a8e', selectforeground='#ffffff',
                              activestyle='none', exportselection=False)
-        self.lb.pack(fill='x', padx=12, pady=(12, 6))
+        self.lb.pack(fill='x', padx=10, pady=(10, 5))
         self.lb.bind('<<ListboxSelect>>', self._pick)
-        btn2 = dict(bg='#ffffff', fg='#475569', activebackground='#f1f5f9',
+        btn2 = dict(bg='#333338', fg='#e0e0e4', activebackground='#42424a',
                     activeforeground=self.WFG, font=(F, 9), bd=0, padx=14, pady=4,
-                    cursor='hand2', highlightthickness=1, highlightbackground='#cbd5e1')
-        brow = tk.Frame(c1, bg='#ffffff')
-        brow.pack(fill='x', padx=12, pady=(0, 12))
+                    cursor='hand2', highlightthickness=1, highlightbackground='#5a5a62')
+        brow = tk.Frame(c1, bg=self.CARD)
+        brow.pack(fill='x', padx=10, pady=(0, 10))
         tk.Button(brow, text='＋ 新增', command=self._add, **btn2).pack(side='left')
         tk.Button(brow, text='删除', command=self._del, **btn2).pack(side='left', padx=(8, 0))
 
@@ -730,33 +731,33 @@ class AICfg(tk.Toplevel):
         self.e_alert = self._field(c2, '用量告警阈值 %（0=禁用，默认 90）', F)
         self.e_alert.insert(0, cfg.get('ai_alert', 90))
         self.btn_test = tk.Button(c2, text='测试连接', command=self._test, **btn2)
-        self.btn_test.pack(anchor='w', padx=12, pady=(10, 12))
+        self.btn_test.pack(anchor='w', padx=10, pady=(8, 10))
 
         bot = tk.Frame(self, bg=self.WBG)
-        bot.pack(fill='x', padx=20, pady=(6, 16))
+        bot.pack(fill='x', padx=16, pady=(4, 12))
         self.status = tk.Label(bot, bg=self.WBG, fg=self.DIM, font=(F, 9), anchor='w',
                                text='密钥经 Windows DPAPI 加密存储，仅本机当前用户可解')
         self.status.pack(side='left', fill='x', expand=True)
         tk.Button(bot, text='保存并关闭', command=self._save, bg=self.ACC, fg='#ffffff',
-                  activebackground='#1d4ed8', activeforeground='#ffffff',
+                  activebackground='#3d8fe0', activeforeground='#ffffff',
                   font=(F, 10, 'bold'), bd=0, padx=18, pady=5,
                   cursor='hand2').pack(side='right')
         self._refresh()
 
     def _card(self):
-        c = tk.Frame(self, bg='#ffffff', highlightthickness=1,
+        c = tk.Frame(self, bg=self.CARD, highlightthickness=1,
                      highlightbackground=self.LINE)
-        c.pack(fill='x', padx=20, pady=4)
+        c.pack(fill='x', padx=16, pady=3)
         return c
 
     def _field(self, parent, label, f, secret=False):
-        tk.Label(parent, text=label, bg='#ffffff', fg=self.DIM, font=(f, 9)
-                 ).pack(anchor='w', padx=12, pady=(10, 2))
-        e = tk.Entry(parent, bg='#ffffff', fg=self.WFG, bd=0, width=44, font=(f, 10),
+        tk.Label(parent, text=label, bg=self.CARD, fg=self.DIM, font=(f, 9)
+                 ).pack(anchor='w', padx=10, pady=(8, 2))
+        e = tk.Entry(parent, bg='#1c1c1e', fg=self.WFG, bd=0, width=44, font=(f, 10),
                      insertbackground=self.WFG, show='●' if secret else '',
                      highlightthickness=1, highlightbackground=self.LINE,
                      highlightcolor=self.ACC)  # 聚焦时边框变蓝
-        e.pack(fill='x', padx=12)
+        e.pack(fill='x', padx=10)
         return e
 
     def _refresh(self):
@@ -820,7 +821,7 @@ class AICfg(tk.Toplevel):
             else:
                 r = test_provider(url, key, tok)
             self.after(0, lambda: (self.status.config(
-                text=r, fg='#16a34a' if r.startswith(('连接', '余')) else '#dc2626'),
+                text=r, fg='#5ad478' if r.startswith(('连接', '余')) else '#ff6b66'),
                 self.btn_test.config(state='normal')))
         threading.Thread(target=run, daemon=True).start()
 
@@ -829,15 +830,15 @@ class AICfg(tk.Toplevel):
         for p in self.provs:
             if not (p['name'] and p['url'].startswith('http') and p['key']):
                 self.status.config(text='有条目未填全（名称 / 地址需 http 开头 / Key）',
-                                   fg='#dc2626')
+                                   fg='#ff6b66')
                 return
             if bool(p.get('token')) != bool(p.get('uid')):
                 self.status.config(text='「访问令牌」与「用户 UID」需同时填写（或都留空）',
-                                   fg='#dc2626')
+                                   fg='#ff6b66')
                 return
         alert = self.e_alert.get().strip()
         if not (alert.isdigit() and int(alert) <= 100):
-            self.status.config(text='告警阈值需为 0-100 的整数', fg='#dc2626')
+            self.status.config(text='告警阈值需为 0-100 的整数', fg='#ff6b66')
             return
         try:
             cfg = json.loads(CFG_AI.read_text('utf-8'))
