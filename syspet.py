@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.6.0'
+__version__ = '1.7.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -69,7 +69,7 @@ def setup_log():
         '线程异常', exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 
 KEEP = 200
-HINT = '点击记录打开文件 · 滚轮翻看 · 拖动 · 右键'
+HINT = '点事件打开 · 点CPU/内存看进程 · 滚轮翻看 · 拖动 · 右键'
 BG, FG, DIM = '#1c1c1e', '#f2f2f2', '#98989d'
 TRACK, ACCENT = '#3a3a3c', '#4aa3ff'
 TAG_CN = {1: '新增', 2: '删除', 3: '修改', 4: '改名'}
@@ -405,10 +405,76 @@ def fetch_one(p):
         return None
 
 
-def ai_net_loop(state):
+def parse_used_pct(text):
+    """'已用 84% · …' → 84；无百分比语义的文本返回 None"""
+    i = text.find('已用 ')
+    if i < 0:
+        return None
+    d = text[i + 3:text.find('%', i)]
+    return int(d) if d.isdigit() else None
+
+
+def cfg_update(**patch):
+    """合并写 syspet.json 顶层键（保留 providers/exclude/only 等其余配置）"""
+    try:
+        cfg = json.loads(CFG_AI.read_text('utf-8'))
+    except (OSError, ValueError):
+        cfg = {}
+    cfg.update(patch)
+    try:
+        CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
+    except OSError:
+        pass
+
+
+def traffic_load():
+    """今日流量累计 {'date','down','up'}；非当日的旧记录清零"""
+    today = time.strftime('%Y-%m-%d')
+    try:
+        t = json.loads(CFG_AI.read_text('utf-8')).get('traffic') or {}
+        if t.get('date') == today:
+            return {'date': today, 'down': float(t.get('down', 0)),
+                    'up': float(t.get('up', 0))}
+    except (OSError, ValueError, AttributeError):
+        pass
+    return {'date': today, 'down': 0.0, 'up': 0.0}
+
+
+def pos_load():
+    """上次窗口位置 'x,y' → (x, y)；无记录返回 None（默认右下角）"""
+    try:
+        s = json.loads(CFG_AI.read_text('utf-8')).get('pos', '')
+        x, y = s.split(',')
+        return int(x), int(y)
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def top_procs(kind):
+    """Top5 进程 [(名, %)]；CPU 用两段采样（各 ~0.4s）"""
+    procs = list(psutil.process_iter())
+    if kind == 'CPU':
+        for p in procs:
+            try:
+                p.cpu_percent(None)  # 预热基准
+            except psutil.Error:
+                pass
+        time.sleep(0.4)
+    rows = []
+    for p in procs:
+        try:
+            v = p.cpu_percent(None) if kind == 'CPU' else p.memory_percent()
+            rows.append((p.name(), v))
+        except psutil.Error:
+            pass
+    rows.sort(key=lambda r: r[1], reverse=True)
+    return rows[:5]
+
+
+def ai_net_loop(state, events):
     """供应商用量定时查询（默认 60s 一轮，配置变化 ≤5s 热生效）；
     数据版本号驱动 UI 重绘。秒级轮询易触发平台限流，勿调太低"""
-    mtime, next_poll = None, 0.0
+    mtime, next_poll, alert = None, 0.0, 90
     while True:
         try:
             m = CFG_AI.stat().st_mtime
@@ -419,13 +485,23 @@ def ai_net_loop(state):
             mtime = m
             load_excludes()  # 排除规则与供应商配置同文件，一并热加载
             try:
-                provs = json.loads(CFG_AI.read_text('utf-8')).get('providers', [])
+                cfg = json.loads(CFG_AI.read_text('utf-8'))
             except (OSError, ValueError):
-                provs = []
+                cfg = {}
+            alert = cfg.get('ai_alert', 90) or 0  # 百分比阈值，0=禁用
             state['rows'] = [(p.get('name', '?'), fetch_one(p))
-                             for p in provs_plain(provs)[:3]]
+                             for p in provs_plain(cfg.get('providers', []))[:3]]
             state['ver'] += 1
             log.info('AI 余额: %s', state['rows'])
+            for name, text in state['rows']:  # 用量告警：跨阈值报一次，回落重置
+                pct = parse_used_pct(text or '')
+                if not pct or pct < alert:
+                    state['alerted'].discard(name)
+                elif pct >= alert and name not in state['alerted']:
+                    state['alerted'].add(name)
+                    push_event(events, time.strftime('%H:%M:%S'), '告警',
+                               f'{name} 已用 {pct}%（阈值 {alert}%）',
+                               None, None, '')
             next_poll = time.time() + 60
         time.sleep(5)
 
@@ -496,7 +572,7 @@ def drives():
 
 
 def push_event(events, ts, tag, path, old, new, open_path):
-    if tag == '通知':  # 通知非文件事件，不走路径过滤（白名单模式下也要显示）
+    if tag in ('通知', '告警'):  # 非文件事件，不走路径过滤（白名单模式下也要显示）
         events.insert(0, (ts, tag, path, old, new, open_path))
         del events[KEEP:]
         log.info('%s %s', tag, path)
@@ -602,7 +678,7 @@ def clip_path(path, limit=44):
 
 def ev_text(ev):
     ts, tag, path, old, new = ev[:5]
-    sz = '' if tag == '通知' else f'  {size(old)} → {size(new)}'
+    sz = '' if tag in ('通知', '告警') else f'  {size(old)} → {size(new)}'
     return f'{ts} {tag} {clip_path(path)}{sz}'
 
 
@@ -782,16 +858,17 @@ class Pet:
         self.events = []
         self._shown = 0
         self._ctx = 0
-        self.ai_state = {'rows': None, 'ver': 0}
+        self.ai_state = {'rows': None, 'ver': 0, 'alerted': set()}
         self._ai_rows, self._ai_ver = [], -1
         self._io, self._t = None, time.time()
+        self._tr, self._tr_tick = traffic_load(), 0  # 今日流量累计，每 5 分钟落盘
         self.gpu_state = {'gpu': (None, None)}
         threading.Thread(target=drive_manager, args=(self.events, {}),
                          daemon=True).start()
         threading.Thread(target=gpu_loop, args=(self.gpu_state,),
                          daemon=True).start()
-        threading.Thread(target=ai_net_loop, args=(self.ai_state,),
-                         daemon=True).start()
+        threading.Thread(target=ai_net_loop,
+                         args=(self.ai_state, self.events), daemon=True).start()
         # 通知捕获：独立子进程轮询 UIA（Tk 进程内调 UIA 必死锁），管道行协议回传
         self._nproc = None
         if CUIAutomation:
@@ -830,6 +907,8 @@ class Pet:
         self.c_up.pack(side='left', padx=(8, 0))
         self.c_clk = tk.Label(head, bg='#141416', fg=DIM, font=hf)
         self.c_clk.pack(side='right', padx=(0, 12))
+        self.c_day = tk.Label(head, bg='#141416', fg=DIM, font=hf)  # 今日流量 Σ
+        self.c_day.pack(side='right', padx=(0, 10))
 
         sysf = tk.Frame(r, bg=BG)
         sysf.pack(fill='x', padx=10, pady=(6, 2))
@@ -838,6 +917,10 @@ class Pet:
         self.g_mem = Gauge(sysf, '内存', 1, 0, f)
         self.g_vram = Gauge(sysf, '显存', 1, 3, f)
         self.g_dsk = Gauge(sysf, 'C盘', 2, 0, f)
+        for g, kind in ((self.g_cpu, 'CPU'), (self.g_mem, '内存')):
+            for wgt in (g.cv, g.val):  # 点击仪表弹 Top 进程；'break' 防触发拖窗
+                wgt.bind('<Button-1>', lambda e, k=kind:
+                         (self.show_top(k), 'break')[1])
         self.ai_f = tk.Frame(r, bg=BG)  # AI 用量行独立紧凑布局，不受仪表列宽影响
         self.ai_f.pack(fill='x', padx=10, pady=(2, 0))
 
@@ -850,9 +933,10 @@ class Pet:
         self.txt.tag_config('ext', foreground='#56c8b0')
         for t, c in (('新增', '#5ad478'), ('删除', '#f0635f'),
                      ('修改', '#f2c14e'), ('改名', '#61a5f2'),
-                     ('通知', '#c39bef')):
+                     ('通知', '#c39bef'), ('告警', '#ff6b66')):
             self.txt.tag_config(f't-{t}', foreground=c)
-        for t in ('ts', 'ev', 'ext', 't-新增', 't-删除', 't-修改', 't-改名', 't-通知'):
+        for t in ('ts', 'ev', 'ext', 't-新增', 't-删除', 't-修改', 't-改名',
+                  't-通知', 't-告警'):
             self.txt.tag_bind(t, '<Button-1>', self._open_ev)
             self.txt.tag_bind(t, '<Button-3>', self._ctx_ev)
 
@@ -871,14 +955,19 @@ class Pet:
         menu.add_checkbutton(label='开机自启动', variable=self.auto_var,
                              command=self._toggle_autostart)
         menu.add_separator()
-        menu.add_command(label='退出', command=r.destroy)
+        menu.add_command(label='退出', command=self._quit)
         r.bind('<Button-3>', lambda e: menu.tk_popup(e.x_root, e.y_root))
         r.bind('<Button-1>', self._grab)
         r.bind('<B1-Motion>', self._drag)
+        r.bind('<ButtonRelease-1>', self._drop)  # 拖动结束保存位置
         self.tick()  # 先填充文本撑出真实尺寸，再定位；geometry 调用后会冻结自动伸缩
         r.update_idletasks()
-        r.geometry(f'+{r.winfo_screenwidth() - r.winfo_width() - 16}'
-                   f'+{r.winfo_screenheight() - r.winfo_height() - 56}')
+        pos = pos_load()
+        if pos:  # 记忆位置优先
+            r.geometry(f'+{pos[0]}+{pos[1]}')
+        else:
+            r.geometry(f'+{r.winfo_screenwidth() - r.winfo_width() - 16}'
+                       f'+{r.winfo_screenheight() - r.winfo_height() - 56}')
 
     def _read_notify(self):
         """读通知子进程 stdout：每行 'app\t正文' → 事件流"""
@@ -889,6 +978,40 @@ class Pet:
             app, _, body = line.partition('\t')
             push_event(self.events, time.strftime('%H:%M:%S'), '通知',
                        f'{app} {body}' if app else body, None, None, '')
+
+    def _drop(self, _e):
+        cfg_update(pos=f'{self.root.winfo_x()},{self.root.winfo_y()}')
+
+    def _quit(self):
+        cfg_update(traffic=self._tr)  # 流量累计落盘
+        if self._nproc:
+            self._nproc.terminate()
+        self.root.destroy()
+
+    def show_top(self, kind):
+        """后台采样（CPU 需 ~0.8s 两段采集），完成后弹 Top5 小窗"""
+        def run():
+            rows = top_procs(kind)
+            self.root.after(0, lambda: self._top_win(kind, rows))
+        threading.Thread(target=run, daemon=True).start()
+
+    def _top_win(self, kind, rows):
+        if not rows:
+            return
+        w = tk.Toplevel(self.root)
+        w.overrideredirect(True)
+        w.attributes('-topmost', True)
+        w.configure(bg='#141416')
+        tk.Label(w, text=f'{kind} Top 5（点击关闭）', bg='#141416', fg=ACCENT,
+                 font=('Microsoft YaHei UI', 9, 'bold'), anchor='w',
+                 padx=10).pack(fill='x', pady=(6, 2))
+        for name, v in rows:
+            tk.Label(w, text=f'{name[:24]:24s} {v:5.1f}%', bg='#141416', fg=FG,
+                     font=('Consolas', 9), anchor='w', padx=10).pack(fill='x')
+        w.bind('<Button-1>', lambda e: w.destroy())
+        w.update_idletasks()
+        w.geometry(f'+{self.root.winfo_x()}+{self.root.winfo_y() + self.root.winfo_height() + 6}')
+        w.after(8000, w.destroy)  # 超时自动关
 
     def _grab(self, e):
         self._d = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
@@ -906,6 +1029,15 @@ class Pet:
         down = (io.bytes_recv - self._io.bytes_recv) / dt if self._io else 0
         up = (io.bytes_sent - self._io.bytes_sent) / dt if self._io else 0
         self._io, self._t = io, t
+        today = time.strftime('%Y-%m-%d')  # 跨日清零
+        if self._tr['date'] != today:
+            self._tr = {'date': today, 'down': 0.0, 'up': 0.0}
+        self._tr['down'] += down
+        self._tr['up'] += up
+        self._tr_tick += 1
+        if self._tr_tick >= 300:  # 每 5 分钟落盘一次
+            self._tr_tick = 0
+            cfg_update(traffic=self._tr)
 
         self.g_cpu.set(cpu, mood(cpu))
         self.g_mem.set(mem, mood(mem))
@@ -914,6 +1046,7 @@ class Pet:
         self.g_gpu.set(gu, mood(gu) if gu is not None else FG)
         self.g_vram.set(gv, mood(gv) if gv is not None else FG)
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
+        self.c_day.config(text=f'Σ {size(self._tr["down"] + self._tr["up"])}')
         self.c_down.config(text=f'↓ {speed(down)}')
         self.c_up.config(text=f'↑ {speed(up)}')
         self._render_ai()
@@ -949,8 +1082,8 @@ class Pet:
         t.insert('1.0', base, 'ev')                            #        主体
         t.insert('1.0', '  ', 'ev')                            #        缩进
         t.insert('1.0', '\n')                                  # 摘要→路径换行
-        t.insert('1.0', '' if tag == '通知' else f'  {size(old)} → {size(new)}',
-                 'ev')                                         # 摘要行: 大小（通知无大小）
+        t.insert('1.0', '' if tag in ('通知', '告警') else f'  {size(old)} → {size(new)}',
+                 'ev')                                         # 摘要行: 大小（通知/告警无）
         t.insert('1.0', f'{tag} ', (f't-{tag}', 'ev'))         #        类型
         t.insert('1.0', f'{ts} ', ('ts', 'ev'))                #        时间
         if int(t.index('end-1c').split('.')[0]) > KEEP * 2:

@@ -1,9 +1,11 @@
 import os
 import json
+import time
 from pathlib import Path
 import syspet
 from syspet import (handle_batch, ev_text, size, rr, split_ext, clip_path,
-                    push_event, enc, dec, _user_dirs, upgrade_keys)
+                    push_event, enc, dec, _user_dirs, upgrade_keys,
+                    parse_used_pct, cfg_update, traffic_load)
 
 syspet._only, syspet._excludes = (), syspet.NOISE  # 隔离本机 syspet.json，固定过滤规则
 
@@ -62,7 +64,26 @@ syspet._only = ()
 # 通知事件：不受白名单/黑名单过滤（非文件），显示无大小列
 _ev3 = []
 push_event(_ev3, '12:00:00', '通知', 'WeChat 你有一条新消息', None, None, '')
-assert len(_ev3) == 1 and ev_text(_ev3[0]) == '12:00:00 通知 WeChat 你有一条新消息'
+push_event(_ev3, '12:00:00', '告警', '团队 已用 93%（阈值 90%）', None, None, '')
+assert len(_ev3) == 2 and ev_text(_ev3[1]) == '12:00:00 通知 WeChat 你有一条新消息'
+assert ev_text(_ev3[0]) == '12:00:00 告警 团队 已用 93%（阈值 90%）'
+
+# 用量百分比解析：智谱格式可解析，余额类文本返回 None
+assert parse_used_pct('已用 84% · 剩 16% · 18:59 重置') == 84
+assert parse_used_pct('余 $300.00 · 已用 $0.00') is None
+
+# cfg_update 合并写 + 当日流量往返
+syspet.CFG_AI = _up
+try:
+    _up.write_text(json.dumps({'only': ['d:\\x']}), 'utf-8')
+    syspet.cfg_update(pos='10,20')
+    _c = json.loads(_up.read_text('utf-8'))
+    assert _c['pos'] == '10,20' and _c['only'] == ['d:\\x']  # 其余键保留
+    syspet.cfg_update(traffic={'date': time.strftime('%Y-%m-%d'), 'down': 1024, 'up': 512})
+    assert traffic_load()['down'] == 1024 and traffic_load()['up'] == 512
+finally:
+    _up.unlink()
+    syspet.CFG_AI = syspet.BASE.with_suffix('.json')
 long_p = 'C:\\' + 'x' * 80 + '\\file.txt'
 assert clip_path(long_p).endswith('file.txt') and clip_path(long_p).startswith('C:\\')
 assert clip_path('C:\\short\\a.txt') == 'C:\\short\\a.txt'
