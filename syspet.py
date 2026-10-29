@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.9.0'
+__version__ = '1.9.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -111,23 +111,26 @@ def mood(pct):
 
 
 class Gauge:
-    """名称 + 圆角进度条 + 数值 三列仪表，col 为起始列（双列布局）"""
+    """名称 + 圆角进度条 + 数值 三列仪表，col 为起始列（双列布局）；
+    full=True 跨两列拉满（末行补格，避免右列空白）"""
     W, H, R = 95, 9, 3
 
-    def __init__(self, parent, name, row, col, font):
+    def __init__(self, parent, name, row, col, font, full=False):
         tk.Label(parent, text=name, bg=BG, fg=DIM, font=font, width=4,
                  anchor='w').grid(row=row, column=col, sticky='w')
-        self.cv = tk.Canvas(parent, width=self.W, height=self.H, bg=BG,
+        self._w = self.W * 2 + 62 if full else self.W
+        self.cv = tk.Canvas(parent, width=self._w, height=self.H, bg=BG,
                             highlightthickness=0, bd=0)
-        self.cv.grid(row=row, column=col + 1, padx=(2, 5))
+        self.cv.grid(row=row, column=col + 1, padx=(2, 5),
+                     columnspan=3 if full else 1)
         self.val = tk.Label(parent, text='—', bg=BG, fg=FG,
-                            font=('Consolas', 10, 'bold'),  # 测量值：等宽+粗，强调来自字重
+                            font=('Consolas', 10, 'bold'),  # 测量值：等宽+粗
                             width=4, anchor='e')
-        self.val.grid(row=row, column=col + 2, sticky='e')
+        self.val.grid(row=row, column=col + 5 if full else col + 2, sticky='e')
 
     def set(self, pct, color):
         self.cv.delete('all')
-        w, h, r = self.W, self.H, self.R
+        w, h, r = self._w, self.H, self.R
         self.cv.create_polygon(*rr(0, 0, w, h, r), fill=TRACK, smooth=True)
         if pct is not None:
             fw = max(r + 1, round(w * pct / 100))
@@ -910,7 +913,7 @@ class Pet:
 
         head = tk.Frame(r, bg='#141416')
         head.pack(fill='x', ipady=3)
-        tk.Label(head, text='SysPet', bg='#141416', fg=ACCENT,
+        tk.Label(head, text='SysPet', bg='#141416', fg=DIM,
                  font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 4))
         hf = ('Consolas', 9)
         self.c_net = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w',
@@ -929,7 +932,7 @@ class Pet:
         self.g_gpu = Gauge(sysf, 'GPU', 0, 3, f)
         self.g_mem = Gauge(sysf, '内存', 1, 0, f)
         self.g_vram = Gauge(sysf, '显存', 1, 3, f)
-        self.g_dsk = Gauge(sysf, 'C盘', 2, 0, f)
+        self.g_dsk = Gauge(sysf, 'C盘', 2, 0, f, full=True)  # 末行跨两列拉满
         for g, kind in ((self.g_cpu, 'CPU'), (self.g_mem, '内存')):
             for wgt in (g.cv, g.val):  # 点击仪表弹 Top 进程；'break' 防触发拖窗
                 wgt.bind('<Button-1>', lambda e, k=kind:
@@ -939,11 +942,13 @@ class Pet:
 
         tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=12, pady=(8, 10))
         self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=5, width=38,
-                           highlightthickness=0, wrap='none', spacing1=2, spacing3=2,
+                           highlightthickness=0, wrap='none', spacing1=3, spacing3=3,
                            state='disabled', cursor='arrow')
         self.txt.pack(fill='both', expand=True, padx=12)
         self.txt.tag_config('ts', foreground=DIM, font=('Consolas', 9))  # 时间=测量值
         self.txt.tag_config('mono', font=('Consolas', 9))                # 大小=测量值
+        self.txt.tag_config('empty', foreground='#6a6a70')
+        self._show_empty()
         self.txt.tag_config('ext', foreground='#56c8b0')
         for t, c in (('新增', '#5ad478'), ('删除', '#f0635f'),
                      ('修改', '#f2c14e'), ('改名', '#61a5f2'),
@@ -1141,6 +1146,10 @@ class Pet:
             for ev in reversed(self.events):
                 self._insert_ev(ev)
         elif delta > 0:
+            if self._shown == 0:  # 空态提示让位
+                self.txt.config(state='normal')
+                self.txt.delete('1.0', 'end')
+                self.txt.config(state='disabled')
             for ev in self.events[:delta]:
                 self._insert_ev(ev)
         elif self.events and self.events[0] is not self._top:
@@ -1152,6 +1161,14 @@ class Pet:
         self._top = self.events[0] if self.events else None
         self._shown = len(self.events)
         self.root.after(1000, self.tick)
+
+    def _show_empty(self):
+        """事件流空态提示（craft-floor：空状态是必做状态）"""
+        t = self.txt
+        t.config(state='normal')
+        t.delete('1.0', 'end')
+        t.insert('1.0', '等待文件变化、系统通知与告警…', 'empty')
+        t.config(state='disabled')
 
     def _insert_ev(self, ev):
         """事件插到列表顶部，两行制：摘要行 + 完整路径行（后缀高亮）；每事件 2 行"""
