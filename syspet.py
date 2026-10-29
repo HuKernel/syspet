@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.1.2'
+__version__ = '2.2.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -802,6 +802,8 @@ class AICfg(tk.Toplevel):
         self.e_uid = self._field(c2, '用户 UID（可选，需与令牌同时填）', F)
         self.e_alert = self._field(c2, '用量告警阈值 %（0=禁用，默认 90）', F)
         self.e_alert.insert(0, cfg.get('ai_alert', 90))
+        self.e_rest = self._field(c2, '久坐提醒间隔分钟（0=禁用，默认 45）', F)
+        self.e_rest.insert(0, cfg.get('rest', 45))
         self.btn_test = tk.Button(c2, text='测试连接', command=self._test, **btn2)
         self.btn_test.pack(anchor='w', padx=10, pady=(8, 10))
 
@@ -912,6 +914,10 @@ class AICfg(tk.Toplevel):
         if not (alert.isdigit() and int(alert) <= 100):
             self.status.config(text='告警阈值需为 0-100 的整数', fg='#ff3b30')
             return
+        rest = self.e_rest.get().strip()
+        if not (rest.isdigit() and int(rest) <= 480):
+            self.status.config(text='久坐间隔需为 0-480 的整数', fg='#ff3b30')
+            return
         try:
             cfg = json.loads(CFG_AI.read_text('utf-8'))
         except (OSError, ValueError):
@@ -922,6 +928,7 @@ class AICfg(tk.Toplevel):
                 p['token'] = enc(p['token'])
         cfg['providers'] = self.provs  # 只更新 providers，保留手写的 exclude/only
         cfg['ai_alert'] = int(alert)
+        cfg['rest'] = int(rest)
         CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
         log.info('AI 配置已保存，共 %d 个供应商', len(self.provs))
         self.destroy()  # 主窗后台线程 ≤5 秒内自动加载新配置
@@ -968,9 +975,12 @@ class Pet:
                 log.warning('通知子进程启动失败: %s', e)
         # 先按配置渲染占位行，数据到达后仅替换文本，窗口不跳变
         try:
-            _p = json.loads(CFG_AI.read_text('utf-8')).get('providers', [])
+            _cfg = json.loads(CFG_AI.read_text('utf-8'))
         except (OSError, ValueError):
-            _p = []
+            _cfg = {}
+        _p = _cfg.get('providers', [])
+        self._rest_min = int(_cfg.get('rest', 45) or 0)  # 久坐提醒间隔（分钟），0=禁用
+        self._rest_n = 0
         self.ai_state['rows'] = [(x.get('name', '?'), '…') for x in _p[:3]]
         self.ai_state['ver'] += 1
 
@@ -1214,6 +1224,13 @@ class Pet:
         gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
         self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
+        self._rest_n += 1  # 久坐提醒：程序运行秒数计（睡眠期间不计）
+        if self._rest_min and self._rest_n >= self._rest_min * 60:
+            self._rest_n = 0
+            push_event(self.events, time.strftime('%H:%M:%S'), '通知',
+                       f'久坐提醒 · 已连续工作 {self._rest_min} 分钟，起来活动一下',
+                       None, None, '')
+            toast('SysPet 久坐提醒', f'已连续工作 {self._rest_min} 分钟，起来活动一下')
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
         self.c_day.config(text=f'Σ {size(cur["down"] + cur["up"])}')
         self.c_net.config(text=f'↓ {speed(down)} ↑ {speed(up)}')
