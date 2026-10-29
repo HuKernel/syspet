@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.3.1'
+__version__ = '2.3.2'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -825,7 +825,7 @@ class AICfg(tk.Toplevel):
         self.e_rest.insert(0, cfg.get('rest', 45))
         self.e_alpha = self._field(c3, '待机透明度 %（5-95，默认 72；悬停恒清晰）', F)
         self.e_alpha.insert(0, cfg.get('alpha', 72))
-        tk.Label(c3, text='通用项保存后立即生效；透明度于下次启动应用', bg=self.CARD,
+        tk.Label(c3, text='通用项保存后立即生效', bg=self.CARD,
                  fg=self.DIM, font=(F, 9), anchor='w', padx=10).pack(fill='x', pady=(6, 10))
 
         bot = tk.Frame(self, bg=self.WBG)
@@ -956,6 +956,8 @@ class AICfg(tk.Toplevel):
         cfg['rest'] = int(rest)
         cfg['alpha'] = int(alpha)
         CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
+        self.master.attributes('-alpha', int(alpha) / 100)  # 透明度立即生效
+        self.master.alpha_idle = int(alpha) / 100  # 悬停离开后回落到新值
         log.info('AI 配置已保存，共 %d 个供应商', len(self.provs))
         self.destroy()  # 主窗后台线程 ≤5 秒内自动加载新配置
 
@@ -1015,6 +1017,7 @@ class Pet:
         r.report_callback_exception = lambda *a: log.error('UI 回调异常', exc_info=a)
         r.overrideredirect(True)
         r.attributes('-topmost', True, '-alpha', self._alpha)  # 待机半透明，悬停恢复
+        r.alpha_idle = self._alpha  # 设置窗口保存时可热更新（_hover 回落用）
         r.configure(bg=BG)
         # 等宽只用于测量值；标签/路径/文案用正文字体（去"技术戏服"感）
         f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
@@ -1209,7 +1212,7 @@ class Pet:
         if (fx <= x < fx + self.root.winfo_width()
                 and fy <= y < fy + self.root.winfo_height()):
             return
-        self.root.attributes('-alpha', self._alpha)
+        self.root.attributes('-alpha', self.root.alpha_idle)
         if getattr(self, '_edge', None) and not self._hidden:
             self._hidden = True  # 离开 800ms 后再滑出，防抖动误触
             self._edge_timer = self.root.after(800, self._edge_out)
