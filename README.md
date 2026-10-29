@@ -1,13 +1,27 @@
 # SysPet — 桌宠式系统监控悬浮窗
 
-Windows 桌面常驻小工具：无边框置顶半透明悬浮窗，实时显示系统指标、全盘文件变化、AI 平台用量。
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2B-0078D6.svg)]()
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)]()
+
+Windows 桌面常驻小工具：深色半透明悬浮窗（TrafficMonitor 风格），一个窗口看尽 **系统仪表 + 全盘文件变化 + 系统通知 + AI 平台用量**。单文件绿色版，免安装。
+
+![主悬浮窗](docs/main.png)
+![配置窗口](docs/config.png)
 
 ## 功能
 
-- **系统仪表**：CPU / 内存 / C盘 / GPU / 显存（圆角进度条，随负载绿→黄→红变色）
-- **网速**：实时上/下行速率（标题带内）
-- **全盘文件监控**：Windows 内核通知（`ReadDirectoryChangesW`），所有本地盘 + 热插拔 U 盘实时捕获新增/修改/删除/改名，含修改前后大小快照；滚轮翻看最近 200 条，**单击打开文件、右键选择打开方式/资源管理器定位**
-- **AI 平台用量**（右键 → 配置 AI 供应商，保存后 5 秒内自动生效）：
+### 系统仪表
+CPU / 内存 / C盘 / GPU / 显存（圆角进度条，随负载绿→黄→红变色）；标题带实时显示上/下行网速与时钟。GPU 读数来自 `nvidia-smi`（无 N 卡时显示 `—`）。
+
+### 全盘文件监控
+基于 Windows 内核通知（`ReadDirectoryChangesW`），**所有本地盘 + 热插拔 U 盘**实时捕获新增 / 修改 / 删除 / 改名，含修改前后大小快照；内核洪峰时被拆开的改名事件自动跨批配对。滚轮翻看最近 200 条，**单击直接打开文件、右键选择打开方式 / 资源管理器定位**。
+
+### 系统通知捕获
+其他软件弹出的 Windows Toast 通知（微信、钉钉、邮件等）实时并入事件流（紫色「通知」条目，显示来源应用 + 标题正文），点击条目打开系统通知中心。监听跑在独立子进程里，通过管道回传，不影响主程序稳定性。
+
+### AI 平台用量
+右键 → 「配置 AI 供应商」，保存后 5 秒内自动生效，之后**每 60 秒自动刷新**：
 
 | 平台 | 配置 | 显示 |
 |---|---|---|
@@ -16,47 +30,92 @@ Windows 桌面常驻小工具：无边框置顶半透明悬浮窗，实时显示
 | 同上（需精确账号余额） | + 控制台令牌 + UID | 账号余额 $ |
 | 阿里百炼官方（dashscope） | AccessKeyId + Secret（需 BSS 只读权限） | 余 ¥ · 本月 ¥ |
 
-- **系统通知捕获**：其他软件弹出的 Windows Toast 通知实时并入事件流（紫色"通知"条目，显示来源应用+内容，点击打开通知中心；需 `comtypes`，缺失时自动关闭该功能）
+### 密钥安全
+供应商 key / 令牌经 **Windows DPAPI 加密落盘**（Chrome 保存密码同款机制，绑定当前用户），`syspet.json` 中不存明文；旧版明文配置启动时自动升级为密文。输入框密码遮罩显示。
+
+### 其他
 - **开机自启动**：右键菜单开关（注册表 HKCU Run，免管理员）
-- **密钥加密**：供应商 key/令牌经 Windows DPAPI 加密落盘（绑定当前用户，Chrome 保存密码同款机制）；旧明文配置启动时自动升级为密文，明文不再留存
 - **运行日志**：`syspet.log`，滚动保留 1MB × 2 备份，含全量文件事件审计
 
-## 启动
+## 安装与使用
 
-- **普通用户**：从 [Releases](https://github.com/HuKernel/syspet/releases) 下载 `syspet.exe`，双击即用（单文件绿色版，无需安装 Python；配置 `syspet.json` 与日志自动生成在 exe 同目录）
-- **开发者**：`python syspet.py` 或双击 `启动.bat`（需 pythonw，依赖：`pip install -r requirements.txt`）
-- 重新打包 exe：`pyinstaller --onefile --noconsole --name syspet syspet.py`
+### 普通用户（推荐）
+从 [Releases](https://github.com/HuKernel/syspet/releases) 下载 `syspet.exe`，双击即用——单文件绿色版，**无需安装 Python**。配置与日志自动生成在 exe 同目录。
 
-## 交互
+> 首次启动慢 1~2 秒（自解压）属正常；部分杀毒软件 / SmartScreen 会提示「未知发布者」，放行即可。
 
-- 按住窗口任意处拖动；右键 → 配置 AI 供应商 / 开机自启动 / 退出
-- 事件列表：滚轮翻看、单击打开文件、右键打开方式 / 文件夹定位
-
-## 文件
-
-```
-syspet.py        主程序（单文件）
-test_syspet.py   自检测试：python test_syspet.py
-启动.bat         启动器（pythonw 无控制台）
-syspet.json      AI 供应商配置（key 为 DPAPI 密文，勿提交/分享）
-syspet.log       运行日志
+### 开发者
+```bash
+pip install -r requirements.txt   # psutil, pywin32, comtypes
+python syspet.py                  # 或双击 启动.bat
 ```
 
-## 噪音排除
-
-未配置 `only` 时默认只监控**用户文件区**（真实桌面 / 文档 / 下载目录，自动识别重定向），后台应用目录的变化全部静音。内置排除系统位置：`C:\Windows\`、`C:\ProgramData\`、`C:\Program Files*\`、`AppData\Local\Temp`、回收站、pagefile、NTFS 元数据等；**所有 `.log` 文件**（应用日志高频刷写，含 SysPet 自身日志，防止监控自反馈）；目录自身的"修改"事件（条目变化，无信息量）也静音。
-
-应用后台噪音可在 `syspet.json` 追加（小写子串匹配，改后 5 秒内自动生效）：
+## 配置说明（syspet.json）
 
 ```json
 {
-  "providers": ["..."],
-  "exclude": ["sogoupy.users", "netease", "zcode_data"]
+  "providers": [
+    {
+      "name": "智谱",
+      "url": "https://bigmodel.cn",
+      "key": "dpapi:AAAA…（加密后）",
+      "token": "（可选）控制台系统访问令牌",
+      "uid": "（可选）控制台用户 ID，需与令牌同时填"
+    }
+  ],
+  "exclude": ["sogoupy.users", "zcode_data"],
+  "only": ["E:\\桌面\\"]
 }
 ```
 
-## 注意
+| 字段 | 说明 |
+|---|---|
+| `providers[].name / url / key` | 必填：名称、API 地址（http 开头）、API key |
+| `providers[].token + uid` | 可选且需成对：new-api 系控制台「系统访问令牌 + 用户 ID」，填了显示账号精确余额 |
+| `exclude` | 黑名单：小写子串匹配，命中的路径不监控 |
+| `only` | 白名单：只监控名单内目录（优先于黑名单范围圈定） |
 
-- `syspet.json`（密钥配置）与 `syspet.log*`（含文件路径与账户用量）均已列入 `.gitignore`，不会进入仓库
-- 密文仅当前 Windows 用户本机可解：换机器/用户后需重新填写 key（属预期安全行为）
-- 阿里云 AccessKey 建议使用仅授权 `AliyunBSSReadOnlyAccess` 的子账号
+- 一般直接用**配置窗口**（右键 → 配置 AI 供应商）增删改查，无需手改 JSON；手改后 5 秒内热生效。
+- **未配置 `only` 时默认只监控用户文件区**（真实桌面 / 文档 / 下载目录，自动识别重定向，如桌面挪到 `E:\桌面`）。
+
+## 交互速查
+
+| 操作 | 效果 |
+|---|---|
+| 按住窗口任意处拖动 | 移动位置 |
+| 事件行单击 | 打开该文件（通知行 → 打开通知中心） |
+| 事件行右键 | 打开方式… / 在文件夹中显示 |
+| 事件列表滚轮 | 翻看历史（最近 200 条） |
+| 窗口右键 | 配置 AI 供应商 / 开机自启动 / 退出 |
+
+## 噪音排除
+
+内置排除：`C:\Windows\`、`C:\ProgramData\`、`C:\Program Files*\`、`AppData\Local\Temp`、回收站、pagefile、NTFS 元数据等系统位置；**所有 `.log` 文件**（应用日志高频刷写，含 SysPet 自身日志，防止监控自反馈）；目录自身的「修改」事件。应用后台噪音可在 `syspet.json` 的 `exclude` 追加，5 秒内自动生效。
+
+## 打包
+
+```bash
+pyinstaller --onefile --noconsole --name syspet --hidden-import comtypes.stream syspet.py
+```
+
+## FAQ
+
+- **通知不显示？** 依次检查：`pip install comtypes`；Windows 设置 → 通知，确认「获取来自应用的通知」开启、对应应用未被静音；专注助手（勿扰模式）会拦横幅。
+- **换电脑 / 换用户后 key 失效？** DPAPI 密文仅当前 Windows 用户本机可解（安全特性），重新填写一次 key 即可。
+- **exe 和脚本版的配置是分开的**：各自读写自己所在目录的 `syspet.json`，互不影响。
+- **窗口拖没了？** 删除 `syspet.json` 同目录无自动恢复——默认定位屏幕右下角，拖出屏幕的概率极低；真发生可删配置文件重启。
+
+## 同类工具对比
+
+| 工具 | 系统仪表 | 文件监控 | 系统通知 | AI 用量 | 形态 |
+|---|---|---|---|---|---|
+| **SysPet** | ✅ | ✅ 全盘 | ✅ | ✅ 四类平台 | 单文件悬浮窗 |
+| [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) | ✅ | — | — | — | 任务栏/悬浮窗 |
+| [Rainmeter](https://github.com/rainmeter/rainmeter) | ✅ 皮肤生态 | 插件 | — | — | 桌面皮肤 |
+| [InfoHub](https://github.com/iwascy/InfoHub) | — | — | — | ✅ | Web 看板 |
+
+SysPet 的定位不是任何单项的替代品，而是「一个窗口看尽一切」的四合一组合。
+
+## License
+
+[MIT](LICENSE) © HuKernel

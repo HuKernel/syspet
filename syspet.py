@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.5.1'
+__version__ = '1.6.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -70,8 +70,8 @@ def setup_log():
 
 KEEP = 200
 HINT = '点击记录打开文件 · 滚轮翻看 · 拖动 · 右键'
-BG, FG, DIM = '#f6f5f2', '#3d3a37', '#807b76'
-TRACK, ACCENT = '#e7e4df', '#e8862e'
+BG, FG, DIM = '#1c1c1e', '#f2f2f2', '#98989d'
+TRACK, ACCENT = '#3a3a3c', '#4aa3ff'
 TAG_CN = {1: '新增', 2: '删除', 3: '修改', 4: '改名'}
 NOTIFY_MASK = (win32con.FILE_NOTIFY_CHANGE_FILE_NAME
                | win32con.FILE_NOTIFY_CHANGE_LAST_WRITE
@@ -106,7 +106,7 @@ def speed(b):
 
 
 def mood(pct):
-    return '#7fbf8e' if pct < 60 else '#eebe55' if pct < 90 else '#e98181'
+    return '#5ad478' if pct < 60 else '#f2c14e' if pct < 90 else '#f0635f'
 
 
 class Gauge:
@@ -119,7 +119,8 @@ class Gauge:
         self.cv = tk.Canvas(parent, width=self.W, height=self.H, bg=BG,
                             highlightthickness=0, bd=0)
         self.cv.grid(row=row, column=col + 1, padx=(2, 5))
-        self.val = tk.Label(parent, text='—', bg=BG, fg=FG, font=font,
+        self.val = tk.Label(parent, text='—', bg=BG, fg=FG,
+                            font=('Consolas', 10),  # 等宽数字，数值变化不抖动
                             width=4, anchor='e')
         self.val.grid(row=row, column=col + 2, sticky='e')
 
@@ -814,20 +815,20 @@ class Pet:
         r = self.root = tk.Tk()
         r.report_callback_exception = lambda *a: log.error('UI 回调异常', exc_info=a)
         r.overrideredirect(True)
-        r.attributes('-topmost', True, '-alpha', 0.97)
+        r.attributes('-topmost', True, '-alpha', 0.88)
         r.configure(bg=BG)
-        f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
+        f, e_f = ('Microsoft YaHei UI', 9), ('Consolas', 9)  # 标签雅黑，数据等宽
 
-        head = tk.Frame(r, bg='#efece6')
+        head = tk.Frame(r, bg='#141416')
         head.pack(fill='x', ipady=4)
-        tk.Label(head, text='SysPet', bg='#efece6', fg=ACCENT,
+        tk.Label(head, text='SysPet', bg='#141416', fg=ACCENT,
                  font=('Microsoft YaHei UI', 10, 'bold')).pack(side='left', padx=(12, 6))
-        hf = ('Microsoft YaHei UI', 9)
-        self.c_down = tk.Label(head, bg='#efece6', fg=FG, font=hf, anchor='w')
+        hf = ('Consolas', 9)
+        self.c_down = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w')
         self.c_down.pack(side='left')
-        self.c_up = tk.Label(head, bg='#efece6', fg=DIM, font=hf, anchor='w')
+        self.c_up = tk.Label(head, bg='#141416', fg=DIM, font=hf, anchor='w')
         self.c_up.pack(side='left', padx=(8, 0))
-        self.c_clk = tk.Label(head, bg='#efece6', fg=DIM, font=hf)
+        self.c_clk = tk.Label(head, bg='#141416', fg=DIM, font=hf)
         self.c_clk.pack(side='right', padx=(0, 12))
 
         sysf = tk.Frame(r, bg=BG)
@@ -846,10 +847,10 @@ class Pet:
                            state='disabled', cursor='arrow')
         self.txt.pack(fill='both', expand=True, padx=10)
         self.txt.tag_config('ts', foreground=DIM)
-        self.txt.tag_config('ext', foreground='#c99a5b')
-        for t, c in (('新增', '#6aaa7f'), ('删除', '#e07a7a'),
-                     ('修改', '#d9a94e'), ('改名', '#7d9ec7'),
-                     ('通知', '#a78bb7')):
+        self.txt.tag_config('ext', foreground='#56c8b0')
+        for t, c in (('新增', '#5ad478'), ('删除', '#f0635f'),
+                     ('修改', '#f2c14e'), ('改名', '#61a5f2'),
+                     ('通知', '#c39bef')):
             self.txt.tag_config(f't-{t}', foreground=c)
         for t in ('ts', 'ev', 'ext', 't-新增', 't-删除', 't-修改', 't-改名', 't-通知'):
             self.txt.tag_bind(t, '<Button-1>', self._open_ev)
@@ -1019,7 +1020,7 @@ class Pet:
                          font=('Microsoft YaHei UI', 9), anchor='w')
             n.pack(side='left')
             v = tk.Label(row, text=val or '查询失败', bg=BG, fg=FG, width=36,
-                         font=('Microsoft YaHei UI', 9), anchor='w')
+                         font=('Consolas', 9), anchor='w')
             v.pack(side='left', padx=(8, 0))
             self._ai_rows += [row]
 
@@ -1035,7 +1036,7 @@ class Pet:
             self._flash('已' + ('开启' if on else '关闭') + '开机自启动')
 
     def _flash(self, msg):
-        self.hint.config(text=msg, fg='#e07a7a')
+        self.hint.config(text=msg, fg='#f0635f')
         self.root.after(2000, lambda: self.hint.config(text=HINT, fg=DIM))
 
 
