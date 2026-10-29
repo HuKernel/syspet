@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.7.2'
+__version__ = '1.7.3'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -92,11 +92,12 @@ def rr(x1, y1, x2, y2, r):
 
 
 def size(n):
+    """字节量 → 可读串：≥100 用整数、否则 1 位小数；按显示精度舍入达 1024 即进位"""
     if n is None:
         return '—'
     for u in ('B', 'KB', 'MB', 'GB', 'TB'):
-        if n < 1024:
-            return f'{n:.0f} {u}'
+        if round(n) < 1024:  # 按将要显示的精度判断，杜绝 '1024 KB'
+            return f'{n:.0f} {u}' if u == 'B' or n >= 99.95 else f'{n:.1f} {u}'
         n /= 1024
     return f'{n:.0f} PB'
 
@@ -909,13 +910,17 @@ class Pet:
         tk.Label(head, text='SysPet', bg='#141416', fg=ACCENT,
                  font=('Microsoft YaHei UI', 10, 'bold')).pack(side='left', padx=(12, 6))
         hf = ('Consolas', 9)
-        self.c_down = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w')
+        self.c_down = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w',
+                               width=12)  # 定宽防数字伸缩带动整窗抖动
         self.c_down.pack(side='left')
-        self.c_up = tk.Label(head, bg='#141416', fg=DIM, font=hf, anchor='w')
+        self.c_up = tk.Label(head, bg='#141416', fg=DIM, font=hf, anchor='w',
+                             width=12)
         self.c_up.pack(side='left', padx=(8, 0))
-        self.c_clk = tk.Label(head, bg='#141416', fg=DIM, font=hf)
+        self.c_clk = tk.Label(head, bg='#141416', fg=DIM, font=hf,
+                              width=8, anchor='e')
         self.c_clk.pack(side='right', padx=(0, 12))
-        self.c_day = tk.Label(head, bg='#141416', fg=DIM, font=hf)  # 今日流量 Σ
+        self.c_day = tk.Label(head, bg='#141416', fg=DIM, font=hf,
+                              width=10, anchor='e')  # 今日流量 Σ
         self.c_day.pack(side='right', padx=(0, 10))
 
         sysf = tk.Frame(r, bg=BG)

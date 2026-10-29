@@ -14,7 +14,11 @@ _ud = _user_dirs()
 assert _ud and all(d == d.lower() and d.endswith('\\') and len(d) > 3 for d in _ud), _ud
 
 assert len(rr(0, 0, 92, 10, 4)) == 24 and rr(0, 0, 92, 10, 4)[0] == 4
-assert size(None) == '—' and size(2048) == '2 KB'
+assert size(None) == '—' and size(2048) == '2.0 KB'
+# 单位进位：舍入到 1024 前必须换单位；大值整数、小值 1 位小数
+assert size(1024 * 1024) == '1.0 MB' and size(150) == '150 B'
+assert size(1023.9 * 1024) == '1.0 MB'   # 舍入到 1024 必须进位，禁止 1024 KB
+assert size(1023.4 * 1024) == '1023 KB' and size(512 * 1024) == '512 KB'
 assert split_ext('C:\\a\\b\\报告.docx') == ('C:\\a\\b\\报告', '.docx')
 assert split_ext('C:\\a\\2026.10.28 备份') == ('C:\\a\\2026.10.28 备份', '')
 
