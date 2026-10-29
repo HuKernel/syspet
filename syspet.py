@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.7.0'
+__version__ = '1.7.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -691,10 +691,10 @@ class AICfg(tk.Toplevel):
         self.title('AI 供应商配置')
         self.configure(bg=self.WBG)
         try:
-            self.provs = provs_plain(json.loads(CFG_AI.read_text('utf-8'))
-                                     .get('providers', []))
+            cfg = json.loads(CFG_AI.read_text('utf-8'))
         except (OSError, ValueError):
-            self.provs = []
+            cfg = {}
+        self.provs = provs_plain(cfg.get('providers', []))
         self.sel = None
         F = 'Microsoft YaHei UI'
 
@@ -727,6 +727,8 @@ class AICfg(tk.Toplevel):
         self.e_key = self._field(c2, 'Key', F, secret=True)          # 凭据框 ● 遮罩
         self.e_token = self._field(c2, '访问令牌（可选）', F, secret=True)
         self.e_uid = self._field(c2, '用户 UID（可选，需与令牌同时填）', F)
+        self.e_alert = self._field(c2, '用量告警阈值 %（0=禁用，默认 90）', F)
+        self.e_alert.insert(0, cfg.get('ai_alert', 90))
         self.btn_test = tk.Button(c2, text='测试连接', command=self._test, **btn2)
         self.btn_test.pack(anchor='w', padx=12, pady=(10, 12))
 
@@ -833,6 +835,10 @@ class AICfg(tk.Toplevel):
                 self.status.config(text='「访问令牌」与「用户 UID」需同时填写（或都留空）',
                                    fg='#dc2626')
                 return
+        alert = self.e_alert.get().strip()
+        if not (alert.isdigit() and int(alert) <= 100):
+            self.status.config(text='告警阈值需为 0-100 的整数', fg='#dc2626')
+            return
         try:
             cfg = json.loads(CFG_AI.read_text('utf-8'))
         except (OSError, ValueError):
@@ -842,6 +848,7 @@ class AICfg(tk.Toplevel):
             if p.get('token'):
                 p['token'] = enc(p['token'])
         cfg['providers'] = self.provs  # 只更新 providers，保留手写的 exclude/only
+        cfg['ai_alert'] = int(alert)
         CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
         log.info('AI 配置已保存，共 %d 个供应商', len(self.provs))
         self.destroy()  # 主窗后台线程 ≤5 秒内自动加载新配置
