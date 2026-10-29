@@ -86,27 +86,29 @@ try:
     syspet.cfg_update(traffic={'days': [{'date': time.strftime('%Y-%m-%d'), 'down': 1024, 'up': 512}]})
     assert traffic_load()['days'][-1]['down'] == 1024
     assert traffic_load()['days'][-1]['up'] == 512
+finally:
+    _up.unlink()
+    syspet.CFG_AI = syspet.BASE.with_suffix('.json')
 
 # 回归：tick 流量累计必须真实增长（v2.1.0 曾因先更新 self._io 后算差值而恒 0）
 import collections
-import tkinter as tk
 import psutil
 _orig_io = psutil.net_io_counters
-_fake = [collections.namedtuple('IO', 'bytes_recv bytes_sent')(1000, 500),
-         collections.namedtuple('IO', 'bytes_recv bytes_sent')(5000, 900)]
+_fake = [collections.namedtuple('IO', 'bytes_recv bytes_sent')(1000, 500),    # 构造期 tick
+         collections.namedtuple('IO', 'bytes_recv bytes_sent')(5000, 900),    # 测试 tick1
+         collections.namedtuple('IO', 'bytes_recv bytes_sent')(9000, 1500)]   # 测试 tick2
 psutil.net_io_counters = lambda: _fake.pop(0)
+_base_d = traffic_load()['days'][-1]['down']  # 真实配置基数（测试跑在真实文件上）
+_base_u = traffic_load()['days'][-1]['up']
 _p = syspet.Pet()
 _p.tick(); _p.tick()
-assert _p._tr['days'][-1]['down'] == 4000, _p._tr  # 1000→5000 差值被累计
-assert _p._tr['days'][-1]['up'] == 400, _p._tr
+assert _p._tr['days'][-1]['down'] == _base_d + 8000, _p._tr  # (5000-1000)+(9000-5000)
+assert _p._tr['days'][-1]['up'] == _base_u + 1000, _p._tr
 if _p._nproc:
     _p._nproc.terminate()
 _p.root.destroy()
 psutil.net_io_counters = _orig_io
 print('tick 流量累计回归测试通过')
-finally:
-    _up.unlink()
-    syspet.CFG_AI = syspet.BASE.with_suffix('.json')
 long_p = 'C:\\' + 'x' * 80 + '\\file.txt'
 assert clip_path(long_p).endswith('file.txt') and clip_path(long_p).startswith('C:\\')
 assert clip_path('C:\\short\\a.txt') == 'C:\\short\\a.txt'
