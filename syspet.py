@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.7.3'
+__version__ = '1.7.4'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -911,17 +911,17 @@ class Pet:
                  font=('Microsoft YaHei UI', 10, 'bold')).pack(side='left', padx=(12, 6))
         hf = ('Consolas', 9)
         self.c_down = tk.Label(head, bg='#141416', fg=FG, font=hf, anchor='w',
-                               width=12)  # 定宽防数字伸缩带动整窗抖动
+                               width=11)  # 定宽=最长文本 '↓ 1023 KB/s'，防抖且不撑宽
         self.c_down.pack(side='left')
         self.c_up = tk.Label(head, bg='#141416', fg=DIM, font=hf, anchor='w',
-                             width=12)
-        self.c_up.pack(side='left', padx=(8, 0))
+                             width=11)
+        self.c_up.pack(side='left', padx=(6, 0))
         self.c_clk = tk.Label(head, bg='#141416', fg=DIM, font=hf,
                               width=8, anchor='e')
-        self.c_clk.pack(side='right', padx=(0, 12))
+        self.c_clk.pack(side='right', padx=(0, 10))
         self.c_day = tk.Label(head, bg='#141416', fg=DIM, font=hf,
-                              width=10, anchor='e')  # 今日流量 Σ
-        self.c_day.pack(side='right', padx=(0, 10))
+                              width=9, anchor='e')  # 今日流量 Σ，最长 'Σ 1023 GB'
+        self.c_day.pack(side='right')
 
         sysf = tk.Frame(r, bg=BG)
         sysf.pack(fill='x', padx=10, pady=(6, 2))
