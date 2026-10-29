@@ -21,7 +21,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '1.8.0'
+__version__ = '1.8.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -901,7 +901,7 @@ class Pet:
         r = self.root = tk.Tk()
         r.report_callback_exception = lambda *a: log.error('UI 回调异常', exc_info=a)
         r.overrideredirect(True)
-        r.attributes('-topmost', True, '-alpha', 0.88)
+        r.attributes('-topmost', True, '-alpha', 0.55)  # 常驻半透明不挡视线，悬停恢复
         r.configure(bg=BG)
         # 等宽只用于测量值；标签/路径/文案用正文字体（去"技术戏服"感）
         f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
@@ -972,6 +972,8 @@ class Pet:
         r.bind('<Button-1>', self._grab)
         r.bind('<B1-Motion>', self._drag)
         r.bind('<ButtonRelease-1>', self._drop)  # 拖动结束保存位置
+        r.bind('<Enter>', lambda e: self._hover(True))   # 悬停聚焦
+        r.bind('<Leave>', lambda e: self._hover(False))
         self.tick()  # 先填充文本撑出真实尺寸，再定位；geometry 调用后会冻结自动伸缩
         r.update_idletasks()
         pos = pos_load()
@@ -1024,6 +1026,17 @@ class Pet:
         w.update_idletasks()
         w.geometry(f'+{self.root.winfo_x()}+{self.root.winfo_y() + self.root.winfo_height() + 6}')
         w.after(8000, w.destroy)  # 超时自动关
+
+    def _hover(self, on):
+        """悬停聚焦：平时半透明不遮挡，鼠标进入恢复清晰。
+        Leave 会因跨子组件反复触发，需确认指针真离开了本窗才降透明"""
+        if not on:
+            x, y = self.root.winfo_pointerxy()
+            fx, fy = self.root.winfo_rootx(), self.root.winfo_rooty()
+            if (fx <= x < fx + self.root.winfo_width()
+                    and fy <= y < fy + self.root.winfo_height()):
+                return
+        self.root.attributes('-alpha', 0.97 if on else 0.55)
 
     def _grab(self, e):
         self._d = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
