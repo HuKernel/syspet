@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.3.3'
+__version__ = '2.3.4'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -83,7 +83,7 @@ NOISE = ('c:\\windows\\', 'c:\\programdata\\', 'c:\\program files\\',
          'c:\\program files (x86)\\', '\\appdata\\local\\temp\\',
          '$recycle.bin', 'system volume information', 'pagefile.sys', 'swapfile.sys',
          'hiberfil.sys', 'usnjrnl', '$logfile', '$mft', '$extend', 'ntuser.dat',
-         'syspet.log')
+         'syspet.log', 'syspet.json')
 
 
 def rr(x1, y1, x2, y2, r):
@@ -520,25 +520,29 @@ def check_update(events):
 
 
 def toast(title, body):
-    """弹 Windows 原生通知（PowerShell WinRT 投射；AUMID 首次注册）"""
-    try:
-        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
-                                r'SOFTWARE\Classes\AppUserModelId\SysPet') as k:
-            winreg.SetValueEx(k, 'DisplayName', 0, winreg.REG_SZ, 'SysPet')
-        esc = lambda s: s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        ps = ("[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,"
-              "ContentType=WindowsRuntime]|Out-Null;"
-              "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
-              "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
-              "$t=$x.GetElementsByTagName('text');"
-              f"[void]$t.Item(0).AppendChild($x.CreateTextNode('{esc(title)}'));"
-              f"[void]$t.Item(1).AppendChild($x.CreateTextNode('{esc(body)}'));"
-              "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
-              "'SysPet').Show([Windows.UI.Notifications.ToastNotification]::new($x))")
-        subprocess.run(['powershell', '-NoProfile', '-Command', ps], timeout=8,
-                       creationflags=subprocess.CREATE_NO_WINDOW)
-    except Exception as e:
-        log.warning('通知发送失败: %r', e)
+    """弹 Windows 原生通知（PowerShell WinRT；后台线程执行防阻塞 UI；
+    无控制台父进程的子进程 stdio 必须显式重定向，否则 PowerShell 挂起）"""
+    def run():
+        try:
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
+                                    r'SOFTWARE\Classes\AppUserModelId\SysPet') as k:
+                winreg.SetValueEx(k, 'DisplayName', 0, winreg.REG_SZ, 'SysPet')
+            esc = lambda s: s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            ps = ("[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,"
+                  "ContentType=WindowsRuntime]|Out-Null;"
+                  "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
+                  "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+                  "$t=$x.GetElementsByTagName('text');"
+                  f"[void]$t.Item(0).AppendChild($x.CreateTextNode('{esc(title)}'));"
+                  f"[void]$t.Item(1).AppendChild($x.CreateTextNode('{esc(body)}'));"
+                  "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
+                  "'SysPet').Show([Windows.UI.Notifications.ToastNotification]::new($x))")
+            subprocess.run(['powershell', '-NoProfile', '-Command', ps], timeout=4,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        except Exception as e:
+            log.warning('通知发送失败: %r', e)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def ai_net_loop(state, events):
