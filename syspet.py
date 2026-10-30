@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.3.4'
+__version__ = '2.3.5'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -543,6 +543,16 @@ def toast(title, body):
         except Exception as e:
             log.warning('通知发送失败: %r', e)
     threading.Thread(target=run, daemon=True).start()
+
+
+def idle_seconds():
+    """系统键鼠空闲秒数（GetLastInputInfo）——离开工位即无输入"""
+    class LII(ctypes.Structure):
+        _fields_ = [('cbSize', ctypes.c_uint), ('dwTime', ctypes.c_uint)]
+    lii = LII(ctypes.sizeof(LII))
+    if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+        return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000
+    return 0
 
 
 def ai_net_loop(state, events):
@@ -1262,7 +1272,9 @@ class Pet:
         gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
         self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
-        self._rest_n += 1  # 久坐提醒：程序运行秒数计（睡眠期间不计）
+        self._rest_n += 1  # 久坐提醒：连续在岗秒数计
+        if idle_seconds() >= 300:  # 键鼠空闲 ≥5 分钟 = 已休息，久坐计数清零重计
+            self._rest_n = 0
         if self._rest_min and self._rest_n >= self._rest_min * 60:
             self._rest_n = 0
             push_event(self.events, time.strftime('%H:%M:%S'), '通知',
