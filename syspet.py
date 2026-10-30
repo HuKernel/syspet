@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.3.5'
+__version__ = '2.3.6'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -546,13 +546,22 @@ def toast(title, body):
 
 
 def idle_seconds():
-    """系统键鼠空闲秒数（GetLastInputInfo）——离开工位即无输入"""
+    """系统键鼠空闲秒数（GetLastInputInfo，任一输入都刷新）——离开工位即无输入"""
     class LII(ctypes.Structure):
         _fields_ = [('cbSize', ctypes.c_uint), ('dwTime', ctypes.c_uint)]
     lii = LII(ctypes.sizeof(LII))
     if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
         return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000
     return 0
+
+
+def screen_locked():
+    """锁屏中？（锁屏时输入桌面切到 Winlogon，OpenInputDesktop 打不开）"""
+    h = ctypes.windll.user32.OpenInputDesktop(0, False, 0)
+    if h:
+        ctypes.windll.user32.CloseDesktop(h)
+        return False
+    return True
 
 
 def ai_net_loop(state, events):
@@ -1272,8 +1281,9 @@ class Pet:
         gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
         self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
-        self._rest_n += 1  # 久坐提醒：连续在岗秒数计
-        if idle_seconds() >= 300:  # 键鼠空闲 ≥5 分钟 = 已休息，久坐计数清零重计
+        self._rest_n += 1  # 久坐提醒：连续在岗秒数计（短暂不动仍算久坐）
+        if screen_locked() or idle_seconds() >= 900:
+            # 锁屏=确定休息；纯空闲 ≥15 分钟兜底（未锁屏就走人的情形）
             self._rest_n = 0
         if self._rest_min and self._rest_n >= self._rest_min * 60:
             self._rest_n = 0
