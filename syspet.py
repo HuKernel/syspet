@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.4.0'
+__version__ = '2.4.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -1065,6 +1065,7 @@ class Pet:
         _p = _cfg.get('providers', [])
         self._rest_min = int(_cfg.get('rest', 45) or 0)  # 久坐提醒间隔（分钟），0=禁用
         self._rest_n = 0
+        self._rest_reminded, self._last_rem_n = False, 0  # 催促状态与上次提醒计数
         self._alpha = max(0.05, int(_cfg.get('alpha', 72) or 72) / 100)  # 待机透明度
         self.ai_state['rows'] = [(x.get('name', '?'), '…') for x in _p[:3]]
         self.ai_state['ver'] += 1
@@ -1320,12 +1321,18 @@ class Pet:
         if screen_locked() or idle_seconds() >= 900:
             # 锁屏=确定休息；纯空闲 ≥15 分钟兜底（未锁屏就走人的情形）
             self._rest_n = 0
+            self._rest_reminded = False  # 真休息了，解除催促
         if self._rest_min and self._rest_n >= self._rest_min * 60:
-            self._rest_n = 0
-            push_event(self.events, time.strftime('%H:%M:%S'), '通知',
-                       f'久坐提醒 · 已连续工作 {self._rest_min} 分钟，起来活动一下',
-                       None, None, '')
-            toast('SysPet 久坐提醒', f'已连续工作 {self._rest_min} 分钟，起来活动一下')
+            # 到点首提，之后每 5 分钟再催，直到真休息才从零重计
+            if not self._rest_reminded or self._rest_n - self._last_rem_n >= 300:
+                first = not self._rest_reminded
+                self._rest_reminded, self._last_rem_n = True, self._rest_n
+                mins = self._rest_n // 60
+                msg = (f'久坐提醒 · 已连续工作 {mins} 分钟，起来活动一下' if first
+                       else f'仍未休息 · 已连续久坐 {mins} 分钟')
+                push_event(self.events, time.strftime('%H:%M:%S'), '通知',
+                           msg, None, None, '')
+                toast('SysPet 久坐提醒', msg)
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
         self.c_day.config(text=f'Σ {size(cur["down"] + cur["up"])}')
         self.c_net.config(text=f'↓ {speed(down)} ↑ {speed(up)}')

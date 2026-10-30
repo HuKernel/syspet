@@ -56,7 +56,9 @@ token = dict(l.split('=', 1) for l in sh('git', 'credential', 'fill',
               inp='protocol=https\nhost=github.com\n\n').splitlines() if '=' in l)['password']
 
 subprocess.run(['git', 'tag', tag], capture_output=True)  # 已存在则忽略
-sh('git', 'push', 'origin', 'main', tag)
+r = subprocess.run(['git', 'push', 'origin', 'main', tag], capture_output=True)
+if r.returncode:
+    print(f'警告: git push 失败（可稍后补推）: {r.stderr.decode()[:120]}')
 
 notes = sh('git', 'log', '--oneline', f'{tag}^..{tag}').partition(' ')[2]
 try:
