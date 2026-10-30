@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.3.6'
+__version__ = '2.4.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -545,6 +545,38 @@ def toast(title, body):
     threading.Thread(target=run, daemon=True).start()
 
 
+def cpu_utility_init():
+    """打开 % Processor Utility 计数器（任务管理器同口径，含频率提升因子；
+    纯时间口径在高 turbo CPU 上会比任务管理器低近一半）"""
+    pdh = ctypes.windll.pdh
+    q, c = ctypes.c_void_p(), ctypes.c_void_p()
+    if pdh.PdhOpenQueryW(None, 0, ctypes.byref(q)) != 0:
+        return None
+    if pdh.PdhAddEnglishCounterW(
+            q, r'\Processor Information(_Total)\% Processor Utility',
+            0, ctypes.byref(c)) != 0:
+        pdh.PdhCloseQuery(q)
+        return None
+    return q, c
+
+
+def cpu_utility_read(pdh):
+    """读一轮 Utility（rate 计数器需两次采集，首轮返回 None）"""
+    if not pdh:
+        return None
+    q, c = pdh
+
+    class CV(ctypes.Structure):
+        # PDH_FMT_COUNTERVALUE：DWORD 状态 + 联合体（按 double 读），联合体必须单字段
+        _fields_ = [('CStatus', ctypes.c_ulong), ('DoubleValue', ctypes.c_double)]
+    val = CV()
+    if (ctypes.windll.pdh.PdhCollectQueryData(q) != 0
+            or ctypes.windll.pdh.PdhGetFormattedCounterValue(
+                c, 0x200, None, ctypes.byref(val)) != 0 or val.CStatus):
+        return None
+    return max(0.0, min(100.0, val.DoubleValue))
+
+
 def idle_seconds():
     """系统键鼠空闲秒数（GetLastInputInfo，任一输入都刷新）——离开工位即无输入"""
     class LII(ctypes.Structure):
@@ -1003,6 +1035,7 @@ class Pet:
         self._edge, self._hidden, self._edge_timer = None, False, None  # 贴边状态
         self._edge_pos = (0, 0)
         self._armed = set()  # 系统告警武装状态
+        self._pdh = cpu_utility_init()  # 任务管理器同口径 CPU 计数器
         self.gpu_state = {'gpu': (None, None)}
         threading.Thread(target=drive_manager, args=(self.events, {}),
                          daemon=True).start()
@@ -1251,7 +1284,9 @@ class Pet:
         self.root.geometry(f'+{e.x_root - self._d[0]}+{e.y_root - self._d[1]}')
 
     def tick(self):
-        cpu = psutil.cpu_percent()
+        cpu = cpu_utility_read(self._pdh)
+        if cpu is None:
+            cpu = psutil.cpu_percent()  # PDH 不可用时的兜底
         mem = psutil.virtual_memory().percent
         dsk = self._refresh_disk()
         io, t = psutil.net_io_counters(), time.time()
