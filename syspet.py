@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.4.1'
+__version__ = '2.4.2'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -70,6 +70,7 @@ def setup_log():
         '线程异常', exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 
 KEEP = 200
+TS_FMT = '%y-%m-%d %H:%M'  # 事件时间戳：年月日时分（隔天可分辨）
 HINT = '点事件打开 · 拖到屏幕边缘隐藏 · 右键'
 BG, FG, DIM = '#f7f7f9', '#1d1d1f', '#86868b'
 TRACK, ACCENT = '#e3e3e8', '#007aff'
@@ -513,7 +514,7 @@ def check_update(events):
                 timeout=8) as r:
             tag = json.loads(r.read()).get('tag_name', '').lstrip('v')
         if tag and _vtuple(tag) > _vtuple(__version__):
-            push_event(events, time.strftime('%H:%M:%S'), '通知',
+            push_event(events, time.strftime(TS_FMT), '通知',
                        f'SysPet {tag} 可更新（点击打开下载页）', None, None, RELEASE_URL)
     except Exception:
         pass  # 离线/接口变更是常态，静默
@@ -624,7 +625,7 @@ def ai_net_loop(state, events):
                     state['alerted'].discard(name)
                 elif pct >= alert and name not in state['alerted']:
                     state['alerted'].add(name)
-                    push_event(events, time.strftime('%H:%M:%S'), '告警',
+                    push_event(events, time.strftime(TS_FMT), '告警',
                                f'{name} 已用 {pct}%（阈值 {alert}%）',
                                None, None, '')
                     toast('SysPet 告警', f'{name} 已用 {pct}%（阈值 {alert}%）')
@@ -722,7 +723,7 @@ def push_event(events, ts, tag, path, old, new, open_path):
 def handle_batch(batch, drive, events, cache, pending):
     """一批通知 [(action, 盘内相对路径)] → 事件；cache 记录路径上次大小作'前快照'；
     pending 跨批暂存改名旧名，等新名到达配对（内核洪峰时 4/5 会被拆开送达）"""
-    ts = time.strftime('%H:%M:%S')
+    ts = time.strftime(TS_FMT)
     now = time.time()
     for old in [k for k, t in pending.items() if now - t > 10]:
         del pending[old]  # 等不到新名的孤立旧名，放弃
@@ -1174,7 +1175,7 @@ class Pet:
             if not line:
                 continue
             app, _, body = line.partition('\t')
-            push_event(self.events, time.strftime('%H:%M:%S'), '通知',
+            push_event(self.events, time.strftime(TS_FMT), '通知',
                        f'{app} {body}' if app else body, None, None, '')
 
     def _drop(self, _e):
@@ -1330,7 +1331,7 @@ class Pet:
                 mins = self._rest_n // 60
                 msg = (f'久坐提醒 · 已连续工作 {mins} 分钟，起来活动一下' if first
                        else f'仍未休息 · 已连续久坐 {mins} 分钟')
-                push_event(self.events, time.strftime('%H:%M:%S'), '通知',
+                push_event(self.events, time.strftime(TS_FMT), '通知',
                            msg, None, None, '')
                 toast('SysPet 久坐提醒', msg)
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
@@ -1367,7 +1368,7 @@ class Pet:
         if pct >= th and what not in self._armed:
             self._armed.add(what)
             msg = f'{what} {pct:.0f}%（阈值 {th}%）'
-            push_event(self.events, time.strftime('%H:%M:%S'), '告警',
+            push_event(self.events, time.strftime(TS_FMT), '告警',
                        msg, None, None, '')
             toast('SysPet 告警', msg)
         elif pct < th - 5:
@@ -1397,8 +1398,12 @@ class Pet:
         if not ds:
             self._flash('暂无历史流量记录')
             return
-        txt = ' · '.join(f"{d['date'][5:]} ↓{size(d['down'])} ↑{size(d['up'])}"
-                         for d in reversed(ds))
+        # 日期显示：当年省年份，非当年带完整年（跨年后可分辨）
+        year = time.strftime('%Y')
+        txt = ' · '.join(
+            f"{(d['date'] + ' ') if d['date'][:4] != year else d['date'][5:] + ' '}"
+            f"↓{size(d['down'])} ↑{size(d['up'])}"
+            for d in reversed(ds))
         self.hint.config(text=txt, fg=DIM)
         self.root.after(4000, lambda: self.hint.config(text=HINT, fg=DIM))
 

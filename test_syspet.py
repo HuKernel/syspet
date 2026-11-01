@@ -7,6 +7,7 @@ from syspet import (handle_batch, ev_text, size, rr, split_ext, clip_path,
                     push_event, enc, dec, _user_dirs, upgrade_keys,
                     parse_used_pct, cfg_update, traffic_load)
 
+TS = '26-11-01 12:00'  # 与 TS_FMT 同构的样例时间戳
 syspet._only, syspet._excludes = (), syspet.NOISE  # 隔离本机 syspet.json，固定过滤规则
 
 # 空配置默认监控范围：真实用户文件目录（注册表读取，含重定向），小写且以 \ 结尾
@@ -48,29 +49,29 @@ finally:
 
 # 系统噪音过滤：Windows/ProgramData/Temp 等被排除，普通文件放行
 _ev = []
-push_event(_ev, '12:00:00', '修改', 'C:\\Windows\\System32\\x.dll', 1, 2, 'C:\\Windows\\System32\\x.dll')
-push_event(_ev, '12:00:00', '修改', 'C:\\Users\\u\\AppData\\Local\\Temp\\t.tmp',
+push_event(_ev, TS, '修改', 'C:\\Windows\\System32\\x.dll', 1, 2, 'C:\\Windows\\System32\\x.dll')
+push_event(_ev, TS, '修改', 'C:\\Users\\u\\AppData\\Local\\Temp\\t.tmp',
            1, 2, 'C:\\Users\\u\\AppData\\Local\\Temp\\t.tmp')
 assert _ev == [], _ev
-push_event(_ev, '12:00:00', '修改', 'E:\\桌面\\报告.docx', 1, 2, 'E:\\桌面\\报告.docx')
+push_event(_ev, TS, '修改', 'E:\\桌面\\报告.docx', 1, 2, 'E:\\桌面\\报告.docx')
 assert len(_ev) == 1
 
 # 回归：白名单模式内排除规则仍生效——syspet.log 在白名单目录内曾致
 # "写日志→触发监控事件→再写日志"的自激励循环；且任意 .log 一律不监控
 syspet._only = ('e:\\桌面\\',)
 _ev2 = []
-push_event(_ev2, '12:00:00', '修改', 'syspet.log', 1, 2, 'E:\\桌面\\syspet\\syspet.log')
-push_event(_ev2, '12:00:00', '修改', 'app.log', 1, 2, 'E:\\桌面\\app.log')
-push_event(_ev2, '12:00:00', '修改', 'a.txt', 1, 2, 'E:\\桌面\\a.txt')
+push_event(_ev2, TS, '修改', 'syspet.log', 1, 2, 'E:\\桌面\\syspet\\syspet.log')
+push_event(_ev2, TS, '修改', 'app.log', 1, 2, 'E:\\桌面\\app.log')
+push_event(_ev2, TS, '修改', 'a.txt', 1, 2, 'E:\\桌面\\a.txt')
 assert len(_ev2) == 1 and _ev2[0][2] == 'a.txt', _ev2
 syspet._only = ()
 
 # 通知事件：不受白名单/黑名单过滤（非文件），显示无大小列
 _ev3 = []
-push_event(_ev3, '12:00:00', '通知', 'WeChat 你有一条新消息', None, None, '')
-push_event(_ev3, '12:00:00', '告警', '团队 已用 93%（阈值 90%）', None, None, '')
-assert len(_ev3) == 2 and ev_text(_ev3[1]) == '12:00:00 通知 WeChat 你有一条新消息'
-assert ev_text(_ev3[0]) == '12:00:00 告警 团队 已用 93%（阈值 90%）'
+push_event(_ev3, TS, '通知', 'WeChat 你有一条新消息', None, None, '')
+push_event(_ev3, TS, '告警', '团队 已用 93%（阈值 90%）', None, None, '')
+assert len(_ev3) == 2 and ev_text(_ev3[1]) == f'{TS} 通知 WeChat 你有一条新消息'
+assert ev_text(_ev3[0]) == f'{TS} 告警 团队 已用 93%（阈值 90%）'
 
 # 用量百分比解析：智谱格式可解析，余额类文本返回 None
 assert parse_used_pct('已用 84% · 剩 16% · 18:59 重置') == 84
