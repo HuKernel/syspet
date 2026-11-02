@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.4.2'
+__version__ = '2.5.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -237,7 +237,7 @@ def upgrade_keys():
                 p[k] = enc(p[k])
                 changed = True
     if changed:
-        CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
+        cfg_write(cfg)
         log.info('检测到明文密钥，已自动升级为 DPAPI 密文')
 
 
@@ -281,7 +281,7 @@ def zhipu_usage(p):
         u = urlsplit(p['url'])
         req = urllib.request.Request(
             f'{u.scheme}://{u.netloc}/api/monitor/usage/quota/limit',
-            headers={'Authorization': p['key'], 'Accept-Language': 'en-US,en'})
+            headers={'Authorization': p.get('key', ''), 'Accept-Language': 'en-US,en'})
         with urllib.request.urlopen(req, timeout=6) as r:
             resp = json.loads(r.read())
         lim = next(x for x in resp['data']['limits'] if x['type'] == 'TOKENS_LIMIT')
@@ -342,9 +342,9 @@ def ali_rpc(action, aid, secret, extra=None):
 def ali_usage(p):
     """阿里云百炼官方：BSS 查账户余额+本月消费（Key=AccessKeyId，令牌=AccessKeySecret）"""
     try:
-        bal = float(ali_rpc('QueryAccountBalance', p['key'], p['token'])
+        bal = float(ali_rpc('QueryAccountBalance', p.get('key', ''), p.get('token', ''))
                     ['Data'].get('AvailableAmount') or 0)
-        d = ali_rpc('QueryAccountBill', p['key'], p['token'],
+        d = ali_rpc('QueryAccountBill', p.get('key', ''), p.get('token', ''),
                     {'BillingCycle': datetime.date.today().strftime('%Y-%m'),
                      'Granularity': 'MONTHLY'}).get('Data', {})
         m = d.get('SummaryTotal') or (d.get('AccountBillList') or {}).get('SummaryTotal')
@@ -385,7 +385,7 @@ def newapi_account(p):
 def deepseek_usage(p):
     """DeepSeek 官方：/user/balance → CNY 余额"""
     try:
-        d = http_json(p['url'].rstrip('/') + '/user/balance', p['key'])
+        d = http_json(p['url'].rstrip('/') + '/user/balance', p.get('key', ''))
         bal = sum(float(x.get('total_balance') or 0)
                   for x in d.get('balance_infos', []) if x.get('currency') == 'CNY')
         return f'余 ¥{bal:.2f}'
@@ -411,7 +411,7 @@ def fetch_one(p):
             return r
         # 令牌失效则回退令牌视角
     try:
-        base, key = url.rstrip('/'), p['key']
+        base, key = url.rstrip('/'), p.get('key', '')
         sub = http_json(f'{base}/v1/dashboard/billing/subscription', key)
         # 官方语义：usage 为累计消费（美分）；subscription 已换算为美元
         used = http_json(f'{base}/v1/dashboard/billing/usage', key) \
@@ -436,6 +436,13 @@ def parse_used_pct(text):
     return int(d) if d.isdigit() else None
 
 
+def cfg_write(cfg):
+    """原子写 syspet.json：先写 .tmp 再替换，防写入中断留下半截 JSON 丢配置"""
+    tmp = CFG_AI.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
+    os.replace(tmp, CFG_AI)
+
+
 def cfg_update(**patch):
     """合并写 syspet.json 顶层键（保留 providers/exclude/only 等其余配置）"""
     try:
@@ -444,7 +451,7 @@ def cfg_update(**patch):
         cfg = {}
     cfg.update(patch)
     try:
-        CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
+        cfg_write(cfg)
     except OSError:
         pass
 
@@ -528,7 +535,8 @@ def toast(title, body):
             with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
                                     r'SOFTWARE\Classes\AppUserModelId\SysPet') as k:
                 winreg.SetValueEx(k, 'DisplayName', 0, winreg.REG_SZ, 'SysPet')
-            esc = lambda s: s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            esc = lambda s: s.replace('&', '&amp;').replace('<', '&lt;').replace(
+                '>', '&gt;').replace("'", "''")  # PS 单引号串内单引号需双写，兼防注入
             ps = ("[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,"
                   "ContentType=WindowsRuntime]|Out-Null;"
                   "$x=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
@@ -584,7 +592,8 @@ def idle_seconds():
         _fields_ = [('cbSize', ctypes.c_uint), ('dwTime', ctypes.c_uint)]
     lii = LII(ctypes.sizeof(LII))
     if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
-        return (ctypes.windll.kernel32.GetTickCount() - lii.dwTime) / 1000
+        ctypes.windll.kernel32.GetTickCount64.restype = ctypes.c_ulonglong  # 防 49.7 天回绕
+        return (ctypes.windll.kernel32.GetTickCount64() - lii.dwTime) / 1000
     return 0
 
 
@@ -600,7 +609,7 @@ def screen_locked():
 def ai_net_loop(state, events):
     """供应商用量定时查询（默认 60s 一轮，配置变化 ≤5s 热生效）；
     数据版本号驱动 UI 重绘。秒级轮询易触发平台限流，勿调太低"""
-    mtime, next_poll, alert = None, 0.0, 90
+    mtime, next_poll, alert, last_sig = None, 0.0, 90, None
     while True:
         try:
             m = CFG_AI.stat().st_mtime
@@ -609,25 +618,36 @@ def ai_net_loop(state, events):
         now = time.time()
         if m != mtime or now >= next_poll:
             mtime = m
-            load_excludes()  # 排除规则与供应商配置同文件，一并热加载
             try:
                 cfg = json.loads(CFG_AI.read_text('utf-8'))
             except (OSError, ValueError):
                 cfg = {}
-            alert = cfg.get('ai_alert', 90) or 0  # 百分比阈值，0=禁用
-            state['rows'] = [(p.get('name', '?'), fetch_one(p))
-                             for p in provs_plain(cfg.get('providers', []))[:3]]
-            state['ver'] += 1
-            log.info('AI 余额: %s', state['rows'])
-            for name, text in state['rows']:  # 用量告警：跨阈值报一次，回落重置
-                pct = parse_used_pct(text or '')
-                if not pct or pct < alert:
-                    state['alerted'].discard(name)
-                elif pct >= alert and name not in state['alerted']:
-                    state['alerted'].add(name)
-                    push_event(events, time.strftime(TS_FMT), '告警',
-                               f'{name} 已用 {pct}%（阈值 {alert}%）',
-                               None, None, '')
+            # 只对比与查询相关的键：pos/traffic 落盘不会误触发全量重查（防限流）
+            sig = json.dumps([cfg.get('providers'), cfg.get('exclude'),
+                              cfg.get('only'), cfg.get('ai_alert')],
+                             ensure_ascii=False)
+            if sig != last_sig or now >= next_poll:
+                last_sig = sig
+                load_excludes()  # 排除规则与供应商配置同文件，一并热加载
+                alert = cfg.get('ai_alert', 90) or 0  # 百分比阈值，0=禁用
+                try:
+                    state['rows'] = [(p.get('name', '?'), fetch_one(p))
+                                     for p in provs_plain(cfg.get('providers', []))]
+                except Exception:  # 手写配置缺字段等，单轮失败不杀线程
+                    log.warning('AI 查询异常', exc_info=True)
+                    state['rows'] = [(p.get('name', '?'), None) for p in
+                                     (cfg.get('providers') or [])]
+                state['ver'] += 1
+                log.info('AI 余额: %s', state['rows'])
+                for name, text in state['rows']:  # 用量告警：跨阈值报一次，回落重置
+                    pct = parse_used_pct(text or '')
+                    if not pct or pct < alert:
+                        state['alerted'].discard(name)
+                    elif pct >= alert and name not in state['alerted']:
+                        state['alerted'].add(name)
+                        push_event(events, time.strftime(TS_FMT), '告警',
+                                   f'{name} 已用 {pct}%（阈值 {alert}%）',
+                                   None, None, '')
                     toast('SysPet 告警', f'{name} 已用 {pct}%（阈值 {alert}%）')
             next_poll = time.time() + 60
         time.sleep(5)
@@ -753,7 +773,8 @@ def handle_batch(batch, drive, events, cache, pending):
         else:
             continue
         cache[path] = new
-        # ponytail: cache 不设上限，被改过的文件路径集合有限，长期运行可控
+        if len(cache) > 50000:  # 全盘长跑上限：超限整体清空（丢失的仅前后大小快照）
+            cache.clear()
         push_event(events, ts, TAG_CN[a], path, old, new, path)
 
 
@@ -768,16 +789,19 @@ def listen_drive(drive, events, cache):
         log.warning('%s 打开失败: %s', drive, e)
         return
     pending = {}
-    while True:
-        try:
-            batch = win32file.ReadDirectoryChangesW(h, 65536, True, NOTIFY_MASK, None, None)
-        except pywintypes.error as e:
-            if e.winerror == 514:  # 通知洪峰缓冲溢出，丢弃本批继续
-                log.warning('%s 通知溢出，丢弃一批', drive)
-                continue
-            log.warning('%s 监听退出: %s', drive, e)
-            return
-        handle_batch(batch, drive, events, cache, pending)
+    try:
+        while True:
+            try:
+                batch = win32file.ReadDirectoryChangesW(h, 65536, True, NOTIFY_MASK, None, None)
+            except pywintypes.error as e:
+                if e.winerror == 514:  # 通知洪峰缓冲溢出，丢弃本批继续
+                    log.warning('%s 通知溢出，丢弃一批', drive)
+                    continue
+                log.warning('%s 监听退出: %s', drive, e)
+                return
+            handle_batch(batch, drive, events, cache, pending)
+    finally:
+        win32file.CloseHandle(h)  # 退出路径释放目录句柄
 
 
 def drive_manager(events, cache):
@@ -972,7 +996,7 @@ class AICfg(tk.Toplevel):
             else:
                 r = test_provider(url, key, tok)
             self.after(0, lambda: (self.status.config(
-                text=r, fg='#34c759' if r.startswith(('连接', '余')) else '#ff3b30'),
+                text=r, fg='#34c759' if r.startswith(('连接', '余', '无限')) else '#ff3b30'),
                 self.btn_test.config(state='normal')))
         threading.Thread(target=run, daemon=True).start()
 
@@ -1011,7 +1035,7 @@ class AICfg(tk.Toplevel):
         cfg['ai_alert'] = int(alert)
         cfg['rest'] = int(rest)
         cfg['alpha'] = int(alpha)
-        CFG_AI.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
+        cfg_write(cfg)
         self.master.attributes('-alpha', int(alpha) / 100)  # 透明度立即生效
         self.master.alpha_idle = int(alpha) / 100  # 悬停离开后回落到新值
         log.info('AI 配置已保存，共 %d 个供应商', len(self.provs))
@@ -1037,7 +1061,7 @@ class Pet:
         self._edge_pos = (0, 0)
         self._armed = set()  # 系统告警武装状态
         self._pdh = cpu_utility_init()  # 任务管理器同口径 CPU 计数器
-        self.gpu_state = {'gpu': (None, None)}
+        self.gpu_state = {'gpu': (None, None, None)}  # 与 gpu_probe 返回同构，防解包崩
         threading.Thread(target=drive_manager, args=(self.events, {}),
                          daemon=True).start()
         threading.Thread(target=gpu_loop, args=(self.gpu_state,),
@@ -1048,16 +1072,8 @@ class Pet:
         self._nproc = None
         threading.Thread(target=check_update, args=(self.events,),
                          daemon=True).start()
-        if CUIAutomation:
-            cmd = [sys.executable] + ([] if getattr(sys, 'frozen', False)
-                                       else [str(Path(__file__).resolve())]) + ['--notify']
-            try:
-                self._nproc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE,
-                    creationflags=subprocess.CREATE_NO_WINDOW)
-                threading.Thread(target=self._read_notify, daemon=True).start()
-            except OSError as e:
-                log.warning('通知子进程启动失败: %s', e)
+        if CUIAutomation and self._notify_spawn():
+            threading.Thread(target=self._read_notify, daemon=True).start()
         # 先按配置渲染占位行，数据到达后仅替换文本，窗口不跳变
         try:
             _cfg = json.loads(CFG_AI.read_text('utf-8'))
@@ -1068,7 +1084,7 @@ class Pet:
         self._rest_n = 0
         self._rest_reminded, self._last_rem_n = False, 0  # 催促状态与上次提醒计数
         self._alpha = max(0.05, int(_cfg.get('alpha', 72) or 72) / 100)  # 待机透明度
-        self.ai_state['rows'] = [(x.get('name', '?'), '…') for x in _p[:3]]
+        self.ai_state['rows'] = [(x.get('name', '?'), '…') for x in _p]
         self.ai_state['ver'] += 1
 
         r = self.root = tk.Tk()
@@ -1088,7 +1104,7 @@ class Pet:
                  font=('Consolas', 8)).pack(side='left')
         hf = ('Consolas', 9)
         self.c_net = tk.Label(head, bg='#ededf0', fg=FG, font=hf, anchor='w',
-                              width=19)  # 上下行合并；峰值 '↓ 1023 KB ↑ 1023 KB'
+                              width=21)  # 上下行合并；峰值 '↓ 1.0 GB/s ↑ 123 MB/s' 21 字符
         self.c_net.pack(side='left')
         self.c_clk = tk.Label(head, bg='#ededf0', fg=DIM, font=hf,
                               width=8, anchor='e')
@@ -1162,21 +1178,44 @@ class Pet:
         self.tick()  # 先填充文本撑出真实尺寸，再定位；geometry 调用后会冻结自动伸缩
         r.update_idletasks()
         pos = pos_load()
-        if pos:  # 记忆位置优先
-            r.geometry(f'+{pos[0]}+{pos[1]}')
+        if pos:  # 记忆位置优先；clamp 进当前屏幕（拔副屏/改分辨率后防窗口落在屏外）
+            x = min(max(0, pos[0]), r.winfo_screenwidth() - r.winfo_width())
+            y = min(max(0, pos[1]), r.winfo_screenheight() - r.winfo_height())
+            r.geometry(f'+{x}+{y}')
         else:
             r.geometry(f'+{r.winfo_screenwidth() - r.winfo_width() - 16}'
                        f'+{r.winfo_screenheight() - r.winfo_height() - 56}')
 
+    def _notify_spawn(self):
+        """拉起通知子进程；成功返回 True"""
+        cmd = [sys.executable] + ([] if getattr(sys, 'frozen', False)
+                                   else [str(Path(__file__).resolve())]) + ['--notify']
+        try:
+            self._nproc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+            return True
+        except OSError as e:
+            log.warning('通知子进程启动失败: %s', e)
+            return False
+
     def _read_notify(self):
-        """读通知子进程 stdout：每行 'app\t正文' → 事件流"""
-        for raw in self._nproc.stdout:
-            line = raw.decode('utf-8').rstrip('\n')
-            if not line:
+        """读通知子进程 stdout（'app\\t正文' → 事件流）；子进程崩溃自动重启"""
+        while True:
+            for raw in self._nproc.stdout:
+                line = raw.decode('utf-8').rstrip('\n')
+                if not line:
+                    continue
+                app, _, body = line.partition('\t')
+                push_event(self.events, time.strftime(TS_FMT), '通知',
+                           f'{app} {body}' if app else body, None, None, '')
+            if self._nproc.poll() is None:  # 管道 EOF 但进程活着（异常态），防忙转
+                time.sleep(5)
                 continue
-            app, _, body = line.partition('\t')
-            push_event(self.events, time.strftime(TS_FMT), '通知',
-                       f'{app} {body}' if app else body, None, None, '')
+            log.warning('通知子进程退出（码 %s），5 秒后重启', self._nproc.returncode)
+            time.sleep(5)
+            if not self._notify_spawn():
+                return  # 重启失败放弃（下次启动程序再试）
 
     def _drop(self, _e):
         cfg_update(pos=f'{self.root.winfo_x()},{self.root.winfo_y()}')
@@ -1393,19 +1432,16 @@ class Pet:
         return ds[self._dsk_i % len(ds)] if ds else 'C:\\'
 
     def _show_traffic_hist(self):
-        """点击 Σ：显示最近 3 天流量（昨日向前）"""
+        """点击 Σ：toast 弹最近 3 天流量（hint 定宽会截断长文本，弹窗完整可读）"""
         ds = self._tr['days'][-4:-1]
         if not ds:
             self._flash('暂无历史流量记录')
             return
-        # 日期显示：当年省年份，非当年带完整年（跨年后可分辨）
         year = time.strftime('%Y')
-        txt = ' · '.join(
-            f"{(d['date'] + ' ') if d['date'][:4] != year else d['date'][5:] + ' '}"
-            f"↓{size(d['down'])} ↑{size(d['up'])}"
-            for d in reversed(ds))
-        self.hint.config(text=txt, fg=DIM)
-        self.root.after(4000, lambda: self.hint.config(text=HINT, fg=DIM))
+        lines = [f"{(d['date'] + ' ') if d['date'][:4] != year else d['date'][5:] + ' '}"
+                 f"↓{size(d['down'])} ↑{size(d['up'])}"
+                 for d in reversed(ds)]
+        toast('流量历史（最近 3 天）', '\n'.join(lines))
 
     def _show_empty(self):
         """事件流空态提示（craft-floor：空状态是必做状态）"""
@@ -1441,10 +1477,12 @@ class Pet:
         return i if 0 <= i < len(self.events) else None
 
     def _open_ev(self, e):
-        """点击事件行：文件还在就直接打开；通知行打开系统通知中心"""
+        """点击事件行：文件还在就直接打开；通知行打开系统通知中心；告警行无动作"""
         i = self._line_ev(e)
         if i is not None:
-            if self.events[i][1] == '通知':
+            if self.events[i][1] in ('通知', '告警'):
+                if self.events[i][1] == '告警':
+                    return 'break'
                 p = self.events[i][5]
                 if p.startswith('http'):
                     webbrowser.open(p)  # 更新提示等带链接的通知
