@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.6.6'
+__version__ = '2.6.7'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -1698,6 +1698,19 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == '--notify':
         notify_child()
     else:
+        # 单实例锁：已有实例则提示退出（防止残留旧实例不受新配置控制）
+        _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, 'SysPetSingleInstance')
+        if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            toast('SysPet', '已在运行，本次启动自动退出')
+            sys.exit(0)
+        for p in psutil.process_iter(['name', 'cmdline']):  # 清理上次强退的孤儿通知子进程
+            try:
+                cmd = [str(c) for c in (p.info['cmdline'] or [])]
+                if '--notify' in cmd and any('syspet' in c.lower() for c in cmd):
+                    p.kill()
+                    log.info('清理孤儿通知子进程 %s', p.pid)
+            except psutil.Error:
+                pass
         pet = Pet()
         pet.root.mainloop()
         if pet._nproc:
