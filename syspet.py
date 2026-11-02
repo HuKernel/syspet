@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.6.1'
+__version__ = '2.6.2'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -812,6 +812,23 @@ def net_ifaces():
                      if s.isup and 'Loopback' not in n and n != 'lo')
 
 
+_nlm = None
+
+
+def net_connected():
+    """NLM（Network List Manager）联网判定——任务栏网络图标同源，
+    覆盖断 WiFi/切网场景；COM 失败按有网计，避免误报"""
+    global _nlm
+    try:
+        if _nlm is None:
+            import comtypes.client
+            _nlm = comtypes.client.CreateObject(
+                '{DCB00C01-570F-4A9B-8D69-199FDBA5723B}')
+        return bool(_nlm.IsConnectedToInternet)
+    except Exception:
+        return True
+
+
 def drive_manager(events, cache):
     watched, last = {}, set()
     while True:
@@ -823,6 +840,7 @@ def drive_manager(events, cache):
                 toast('SysPet', f'U 盘/存储已插入 {d}')
             for d in sorted(last - ds):
                 push_event(events, ts, '通知', f'存储已移除 {d}', None, None, '')
+                toast('SysPet', f'存储已移除 {d}')
         last = ds
         for d in ds:
             t = watched.get(d)
@@ -1293,15 +1311,15 @@ class Pet:
         self.root.destroy()
 
     def show_top(self, kind):
-        """后台采样（CPU 需 ~0.8s 两段采集），完成后弹 Top5 小窗"""
+        """立即建窗画曲线（数据现成不等采样），Top5 后台采样完异步追加"""
+        w = self._top_win(kind)
+
         def run():
             rows = top_procs(kind)
-            self.root.after(0, lambda: self._top_win(kind, rows))
+            self.root.after(0, lambda: self._top_fill(w, rows))
         threading.Thread(target=run, daemon=True).start()
 
-    def _top_win(self, kind, rows):
-        if not rows:
-            return
+    def _top_win(self, kind):
         w = tk.Toplevel(self.root)
         w.overrideredirect(True)
         w.attributes('-topmost', True)
@@ -1313,13 +1331,32 @@ class Pet:
                        highlightthickness=1, highlightbackground='#d8d8dc')
         self._draw_hist(cv, kind)
         cv.pack(fill='x', padx=10, pady=(2, 4))
+        tk.Label(w, text='Top 5 采样中…', bg='#ededf0', fg='#b0b0b5',
+                 font=('Microsoft YaHei UI', 9), anchor='w',
+                 padx=10).pack(fill='x')
+        w.bind('<Button-1>', lambda e: w.destroy())
+        w.update_idletasks()
+        # 下方放不下时弹上方，x 夹在屏内（主窗常驻右下角，防弹窗出屏不可见）
+        y2 = self.root.winfo_y() + self.root.winfo_height() + 6
+        if y2 + w.winfo_height() > self.root.winfo_screenheight():
+            y2 = self.root.winfo_y() - w.winfo_height() - 6
+        x2 = min(self.root.winfo_x(),
+                 self.root.winfo_screenwidth() - w.winfo_width())
+        w.geometry(f'+{max(0, x2)}+{max(0, y2)}')
+        w.after(8000, w.destroy)  # 超时自动关
+        return w
+
+    def _top_fill(self, w, rows):
+        """Top5 采样结果回填（窗口可能已超时关闭）"""
+        if not w.winfo_exists() or not rows:
+            return
+        for c in w.winfo_children():
+            if c.winfo_class() == 'Label' and '采样中' in (c.cget('text') or ''):
+                c.destroy()
+                break
         for name, v in rows:
             tk.Label(w, text=f'{name[:24]:24s} {v:5.1f}%', bg='#ededf0', fg=FG,
                      font=('Consolas', 9), anchor='w', padx=10).pack(fill='x')
-        w.bind('<Button-1>', lambda e: w.destroy())
-        w.update_idletasks()
-        w.geometry(f'+{self.root.winfo_x()}+{self.root.winfo_y() + self.root.winfo_height() + 6}')
-        w.after(8000, w.destroy)  # 超时自动关
 
     def _draw_hist(self, cv, kind):
         """1 小时历史折线：3600 点环形缓冲，x 按满小时定位（未满时右侧留白）"""
@@ -1399,24 +1436,24 @@ class Pet:
         gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
         self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
-        if self._net_ck % 10 == 0:  # 每 10s 比对网络接口集合（断网/恢复/WiFi 切换）
-            ifs = net_ifaces()
-            if self._net_last is not None and ifs != self._net_last:
-                old, new = self._net_last, ifs
-                if not new:
-                    msg = '网络已断开'
-                    push_event(self.events, time.strftime(TS_FMT), '告警',
+        if self._net_ck % 10 == 0:  # 每 10s：NLM 判定真断网/恢复；接口集合变化报环境通知
+            conn, ifs = net_connected(), net_ifaces()
+            if self._net_last is not None:
+                last_conn, last_ifs = self._net_last
+                ts = time.strftime(TS_FMT)
+                if conn != last_conn:  # 联网翻转（WSL 等常驻虚拟网卡不影响判定）
+                    msg = '网络已恢复' if conn else '网络已断开'
+                    push_event(self.events, ts, '通知' if conn else '告警',
                                msg, None, None, '')
-                else:
-                    if_up = '、'.join(sorted(new - old)) or '…'  # 勿名 up/down：遮蔽网速变量
-                    if_down = '、'.join(sorted(old - new))
-                    msg = (f'网络已连接: {if_up}' if not old
-                           else f'网络环境变化: {if_up} 接入'
-                                + (f'，{if_down} 断开' if if_down else ''))
-                    push_event(self.events, time.strftime(TS_FMT), '通知',
-                               msg, None, None, '')
-                toast('SysPet 网络', msg)
-            self._net_last = ifs
+                    toast('SysPet 网络', msg)
+                elif ifs != last_ifs:  # 仅接口增减（VPN/网卡启停），联网未变
+                    parts = [f'{"、".join(sorted(ifs - last_ifs))} 接入'] if ifs - last_ifs else []
+                    if last_ifs - ifs:
+                        parts.append(f'{"、".join(sorted(last_ifs - ifs))} 断开')
+                    msg = '网络环境变化: ' + '，'.join(parts)
+                    push_event(self.events, ts, '通知', msg, None, None, '')
+                    toast('SysPet 网络', msg)
+            self._net_last = (conn, ifs)
         self._net_ck += 1
         self._hist['CPU'].append(cpu)     # 1 小时曲线采样（deque 满自动淘汰）
         self._hist['内存'].append(mem)
