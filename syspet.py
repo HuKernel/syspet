@@ -2,6 +2,7 @@
 依赖: psutil, pywin32（见 requirements.txt）"""
 import base64, ctypes, datetime, hashlib, hmac, json, logging, os, shutil, subprocess
 import sys, threading, time, tkinter as tk, uuid, webbrowser, winreg
+from collections import deque
 from tkinter import ttk
 import urllib.error, urllib.parse, urllib.request
 from logging.handlers import RotatingFileHandler
@@ -22,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.5.1'
+__version__ = '2.6.0'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -1062,6 +1063,7 @@ class Pet:
         self._edge, self._hidden, self._edge_timer = None, False, None  # 贴边状态
         self._edge_pos = (0, 0)
         self._armed = set()  # 系统告警武装状态
+        self._hist = {'CPU': deque(maxlen=3600), '内存': deque(maxlen=3600)}  # 1h 曲线缓冲
         self._pdh = cpu_utility_init()  # 任务管理器同口径 CPU 计数器
         self.gpu_state = {'gpu': (None, None, None)}  # 与 gpu_probe 返回同构，防解包崩
         threading.Thread(target=drive_manager, args=(self.events, {}),
@@ -1288,9 +1290,13 @@ class Pet:
         w.overrideredirect(True)
         w.attributes('-topmost', True)
         w.configure(bg='#ededf0')
-        tk.Label(w, text=f'{kind} Top 5（点击关闭）', bg='#ededf0', fg=ACCENT,
-                 font=('Microsoft YaHei UI', 9, 'bold'), anchor='w',
+        tk.Label(w, text=f'{kind} · 最近 1 小时 + Top 5（点击关闭）', bg='#ededf0',
+                 fg=ACCENT, font=('Microsoft YaHei UI', 9, 'bold'), anchor='w',
                  padx=10).pack(fill='x', pady=(6, 2))
+        cv = tk.Canvas(w, width=330, height=80, bg='#f7f7f9',
+                       highlightthickness=1, highlightbackground='#d8d8dc')
+        self._draw_hist(cv, kind)
+        cv.pack(fill='x', padx=10, pady=(2, 4))
         for name, v in rows:
             tk.Label(w, text=f'{name[:24]:24s} {v:5.1f}%', bg='#ededf0', fg=FG,
                      font=('Consolas', 9), anchor='w', padx=10).pack(fill='x')
@@ -1298,6 +1304,24 @@ class Pet:
         w.update_idletasks()
         w.geometry(f'+{self.root.winfo_x()}+{self.root.winfo_y() + self.root.winfo_height() + 6}')
         w.after(8000, w.destroy)  # 超时自动关
+
+    def _draw_hist(self, cv, kind):
+        """1 小时历史折线：3600 点环形缓冲，x 按满小时定位（未满时右侧留白）"""
+        W_, H_ = 330, 80
+        for g in (0.25, 0.5, 0.75):  # 网格线
+            cv.create_line(0, H_ * g, W_, H_ * g, fill='#e3e3e8')
+        data = self._hist[kind]
+        if len(data) < 2:
+            cv.create_text(W_ / 2, H_ / 2, text='历史采集中…', fill='#b0b0b5',
+                           font=('Microsoft YaHei UI', 9))
+            return
+        pts = []
+        for i, v in enumerate(data):
+            pts += [i * W_ / 3600, H_ - 4 - v / 100 * (H_ - 8)]
+        cv.create_line(*pts, fill=ACCENT, width=2, smooth=True)
+        cv.create_text(W_ - 4, 12, anchor='e',
+                       text=f'峰 {max(data):.0f}% · 均 {sum(data) / len(data):.0f}%',
+                       fill='#86868b', font=('Microsoft YaHei UI', 8))
 
     def _hover(self, on):
         """悬停聚焦：平时半透明不遮挡，鼠标进入恢复清晰；
@@ -1359,6 +1383,8 @@ class Pet:
         gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
         self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
+        self._hist['CPU'].append(cpu)     # 1 小时曲线采样（deque 满自动淘汰）
+        self._hist['内存'].append(mem)
         self._rest_n += 1  # 久坐提醒：连续在岗秒数计（短暂不动仍算久坐）
         if screen_locked() or idle_seconds() >= 900:
             # 锁屏=确定休息；纯空闲 ≥15 分钟兜底（未锁屏就走人的情形）
