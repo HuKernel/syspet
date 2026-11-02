@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.6.5'
+__version__ = '2.6.6'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -528,13 +528,14 @@ def check_update(events):
         pass  # 离线/接口变更是常态，静默
 
 
-_toast_on = True  # 系统通知总开关（设置窗口可改；关闭后事件流照常记录）
+_toast = {'ai': True, 'sys': True, 'net': True, 'usb': True, 'rest': True}
+# 按类别的系统通知开关（事件流照常记录，仅控制弹窗）；键：ai/sys/net/usb/rest
 
 
-def toast(title, body):
+def toast(title, body, cat='sys'):
     """弹 Windows 原生通知（PowerShell WinRT；后台线程执行防阻塞 UI；
     无控制台父进程的子进程 stdio 必须显式重定向，否则 PowerShell 挂起）"""
-    if not _toast_on:
+    if not _toast.get(cat, True):
         return
 
     def run():
@@ -656,7 +657,7 @@ def ai_net_loop(state, events):
                         push_event(events, time.strftime(TS_FMT), '告警',
                                    f'{name} 已用 {pct}%（阈值 {alert}%）',
                                    None, None, '')
-                        toast('SysPet 告警', f'{name} 已用 {pct}%（阈值 {alert}%）')
+                        toast('SysPet 告警', f'{name} 已用 {pct}%（阈值 {alert}%）', cat='ai')
                 next_poll = time.time() + 60  # 仅真正查过才排下一轮（防拖动无限推迟轮询）
         time.sleep(5)
 
@@ -843,10 +844,10 @@ def drive_manager(events, cache):
             ts = time.strftime(TS_FMT)
             for d in sorted(ds - last):
                 push_event(events, ts, '通知', f'U 盘/存储已插入 {d}', None, None, '')
-                toast('SysPet', f'U 盘/存储已插入 {d}')
+                toast('SysPet', f'U 盘/存储已插入 {d}', cat='usb')
             for d in sorted(last - ds):
                 push_event(events, ts, '通知', f'存储已移除 {d}', None, None, '')
-                toast('SysPet', f'存储已移除 {d}')
+                toast('SysPet', f'存储已移除 {d}', cat='usb')
         last = ds
         for d in ds:
             t = watched.get(d)
@@ -946,12 +947,21 @@ class AICfg(tk.Toplevel):
         self.e_rest.insert(0, cfg.get('rest', 45))
         self.e_alpha = self._field(c3, '待机透明度 %（5-95，默认 72；悬停恒清晰）', F, short=True)
         self.e_alpha.insert(0, cfg.get('alpha', 72))
-        self.toast_var = tk.BooleanVar(value=bool(cfg.get('toast', True)))
-        tk.Checkbutton(c3, text='弹 Windows 系统通知（关闭后仅记录到事件流）',
-                       variable=self.toast_var, bg=self.CARD, fg=self.WFG,
-                       activebackground=self.CARD, activeforeground=self.WFG,
-                       selectcolor='#f7f7f9', font=(F, 9), anchor='w',
-                       highlightthickness=0, bd=0).pack(fill='x', padx=10, pady=(6, 0))
+        tk.Label(c3, text='弹 Windows 系统通知（关闭项仅记录到事件流）', bg=self.CARD,
+                 fg=self.DIM, font=(F, 9), anchor='w').pack(fill='x', padx=10, pady=(8, 0))
+        self.toast_vars = {}
+        grid = tk.Frame(c3, bg=self.CARD)
+        grid.pack(fill='x', padx=10, pady=(2, 0))
+        cats = [('ai', 'AI 用量告警'), ('sys', 'CPU/磁盘告警'), ('net', '网络变化'),
+                ('usb', 'U 盘插拔'), ('rest', '久坐提醒')]
+        for i, (k, label) in enumerate(cats):
+            self.toast_vars[k] = tk.BooleanVar(value=_toast.get(k, True))
+            tk.Checkbutton(grid, text=label, variable=self.toast_vars[k],
+                           bg=self.CARD, fg=self.WFG, activebackground=self.CARD,
+                           activeforeground=self.WFG, selectcolor='#f7f7f9',
+                           font=(F, 9), anchor='w', highlightthickness=0,
+                           bd=0).grid(row=i // 3, column=i % 3, sticky='w',
+                                      padx=(0, 12), pady=1)
         tk.Frame(c3, bg=self.CARD).pack(fill='x', pady=(0, 8))
 
         bot = tk.Frame(self, bg=self.WBG)
@@ -1086,9 +1096,9 @@ class AICfg(tk.Toplevel):
         cfg['ai_alert'] = int(alert)
         cfg['rest'] = int(rest)
         cfg['alpha'] = int(alpha)
-        cfg['toast'] = bool(self.toast_var.get())
-        global _toast_on  # 保存即生效
-        _toast_on = cfg['toast']
+        cfg['toast'] = {k: v.get() for k, v in self.toast_vars.items()}
+        global _toast  # 保存即生效
+        _toast.update(cfg['toast'])
         cfg_write(cfg)
         self.master.attributes('-alpha', int(alpha) / 100)  # 透明度立即生效
         self.master.alpha_idle = int(alpha) / 100  # 悬停离开后回落到新值
@@ -1140,8 +1150,12 @@ class Pet:
         self._rest_n = 0
         self._rest_reminded, self._last_rem_n = False, 0  # 催促状态与上次提醒计数
         self._alpha = max(0.05, int(_cfg.get('alpha', 72) or 72) / 100)  # 待机透明度
-        global _toast_on
-        _toast_on = bool(_cfg.get('toast', True))  # 系统通知开关
+        global _toast
+        t = _cfg.get('toast')
+        if isinstance(t, dict):  # 按类别开/关；旧布尔 false=全关
+            _toast.update({k: v for k, v in t.items() if k in _toast})
+        elif t is False:
+            _toast.update({k: False for k in _toast})
         self.ai_state['rows'] = [(x.get('name', '?'), '…') for x in _p]
         self.ai_state['ver'] += 1
 
@@ -1466,14 +1480,14 @@ class Pet:
                     msg = '网络已恢复' if conn else '网络已断开'
                     push_event(self.events, ts, '通知' if conn else '告警',
                                msg, None, None, '')
-                    toast('SysPet 网络', msg)
+                    toast('SysPet 网络', msg, cat='net')
                 elif ifs != last_ifs:  # 仅接口增减（VPN/网卡启停），联网未变
                     parts = [f'{"、".join(sorted(ifs - last_ifs))} 接入'] if ifs - last_ifs else []
                     if last_ifs - ifs:
                         parts.append(f'{"、".join(sorted(last_ifs - ifs))} 断开')
                     msg = '网络环境变化: ' + '，'.join(parts)
                     push_event(self.events, ts, '通知', msg, None, None, '')
-                    toast('SysPet 网络', msg)
+                    toast('SysPet 网络', msg, cat='net')
             self._net_last = (conn, ifs)
         self._net_ck += 1
         self._hist['CPU'].append(cpu)     # 1 小时曲线采样（deque 满自动淘汰）
@@ -1493,7 +1507,7 @@ class Pet:
                        else f'仍未休息 · 已连续久坐 {mins} 分钟')
                 push_event(self.events, time.strftime(TS_FMT), '通知',
                            msg, None, None, '')
-                toast('SysPet 久坐提醒', msg)
+                toast('SysPet 久坐提醒', msg, cat='rest')
         self.c_clk.config(text=time.strftime('%H:%M:%S'))
         self.c_day.config(text=f'Σ {size(cur["down"] + cur["up"])}')
         self.c_net.config(text=f'↓ {speed(down)} ↑ {speed(up)}')
@@ -1530,7 +1544,7 @@ class Pet:
             msg = f'{what} {pct:.0f}%（阈值 {th}%）'
             push_event(self.events, time.strftime(TS_FMT), '告警',
                        msg, None, None, '')
-            toast('SysPet 告警', msg)
+            toast('SysPet 告警', msg, cat='sys')
         elif pct < th - 5:
             self._armed.discard(what)
 
