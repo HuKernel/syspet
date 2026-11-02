@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.6.0'
+__version__ = '2.6.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -806,10 +806,25 @@ def listen_drive(drive, events, cache):
         win32file.CloseHandle(h)  # 退出路径释放目录句柄
 
 
+def net_ifaces():
+    """当前 up 的物理网络接口名集合（含 WiFi/以太，排除回环）"""
+    return frozenset(n for n, s in psutil.net_if_stats().items()
+                     if s.isup and 'Loopback' not in n and n != 'lo')
+
+
 def drive_manager(events, cache):
-    watched = {}
+    watched, last = {}, set()
     while True:
-        for d in drives():
+        ds = set(drives())
+        if last:  # 存储设备插拔（U 盘/新卷挂载），与文件监控同流
+            ts = time.strftime(TS_FMT)
+            for d in sorted(ds - last):
+                push_event(events, ts, '通知', f'U 盘/存储已插入 {d}', None, None, '')
+                toast('SysPet', f'U 盘/存储已插入 {d}')
+            for d in sorted(last - ds):
+                push_event(events, ts, '通知', f'存储已移除 {d}', None, None, '')
+        last = ds
+        for d in ds:
             t = watched.get(d)
             if t is None or not t.is_alive():
                 t = threading.Thread(target=listen_drive, args=(d, events, cache), daemon=True)
@@ -1064,6 +1079,7 @@ class Pet:
         self._edge_pos = (0, 0)
         self._armed = set()  # 系统告警武装状态
         self._hist = {'CPU': deque(maxlen=3600), '内存': deque(maxlen=3600)}  # 1h 曲线缓冲
+        self._net_last, self._net_ck = None, 0  # 网络状态比对
         self._pdh = cpu_utility_init()  # 任务管理器同口径 CPU 计数器
         self.gpu_state = {'gpu': (None, None, None)}  # 与 gpu_probe 返回同构，防解包崩
         threading.Thread(target=drive_manager, args=(self.events, {}),
@@ -1383,6 +1399,25 @@ class Pet:
         gt_c = '#34c759' if (gt or 0) < 60 else '#ff9500' if gt < 80 else '#ff3b30'
         self.g_gput.set(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
+        if self._net_ck % 10 == 0:  # 每 10s 比对网络接口集合（断网/恢复/WiFi 切换）
+            ifs = net_ifaces()
+            if self._net_last is not None and ifs != self._net_last:
+                old, new = self._net_last, ifs
+                if not new:
+                    msg = '网络已断开'
+                    push_event(self.events, time.strftime(TS_FMT), '告警',
+                               msg, None, None, '')
+                else:
+                    if_up = '、'.join(sorted(new - old)) or '…'  # 勿名 up/down：遮蔽网速变量
+                    if_down = '、'.join(sorted(old - new))
+                    msg = (f'网络已连接: {if_up}' if not old
+                           else f'网络环境变化: {if_up} 接入'
+                                + (f'，{if_down} 断开' if if_down else ''))
+                    push_event(self.events, time.strftime(TS_FMT), '通知',
+                               msg, None, None, '')
+                toast('SysPet 网络', msg)
+            self._net_last = ifs
+        self._net_ck += 1
         self._hist['CPU'].append(cpu)     # 1 小时曲线采样（deque 满自动淘汰）
         self._hist['内存'].append(mem)
         self._rest_n += 1  # 久坐提醒：连续在岗秒数计（短暂不动仍算久坐）
