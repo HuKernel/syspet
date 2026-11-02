@@ -22,7 +22,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.5.0'
+__version__ = '2.5.1'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -368,7 +368,7 @@ def ali_usage(p):
 def newapi_account(p):
     """new-api 账号视角：/api/user/self + 控制台访问令牌（cc-switch 同款）"""
     try:
-        base = p['url'].rstrip('/')
+        base = (p.get('url') or '').rstrip('/')
         req = urllib.request.Request(
             base + '/api/user/self',
             headers={'Authorization': 'Bearer ' + p['token'],
@@ -592,8 +592,9 @@ def idle_seconds():
         _fields_ = [('cbSize', ctypes.c_uint), ('dwTime', ctypes.c_uint)]
     lii = LII(ctypes.sizeof(LII))
     if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
-        ctypes.windll.kernel32.GetTickCount64.restype = ctypes.c_ulonglong  # 防 49.7 天回绕
-        return (ctypes.windll.kernel32.GetTickCount64() - lii.dwTime) / 1000
+        # dwTime 是 32 位 tick，会回绕：须同宽度相减再取无符号（64 位减 32 位回绕后恒为巨值）
+        tick = ctypes.windll.kernel32.GetTickCount()
+        return ((tick - lii.dwTime) & 0xFFFFFFFF) / 1000
     return 0
 
 
@@ -648,8 +649,8 @@ def ai_net_loop(state, events):
                         push_event(events, time.strftime(TS_FMT), '告警',
                                    f'{name} 已用 {pct}%（阈值 {alert}%）',
                                    None, None, '')
-                    toast('SysPet 告警', f'{name} 已用 {pct}%（阈值 {alert}%）')
-            next_poll = time.time() + 60
+                        toast('SysPet 告警', f'{name} 已用 {pct}%（阈值 {alert}%）')
+                next_poll = time.time() + 60  # 仅真正查过才排下一轮（防拖动无限推迟轮询）
         time.sleep(5)
 
 
@@ -1003,7 +1004,8 @@ class AICfg(tk.Toplevel):
     def _save(self):
         self._sync()
         for p in self.provs:
-            if not (p['name'] and p['url'].startswith('http') and p['key']):
+            if not (p.get('name') and (p.get('url') or '').startswith('http')
+                    and p.get('key')):
                 self.status.config(text='有条目未填全（名称 / 地址需 http 开头 / Key）',
                                    fg='#ff3b30')
                 return
@@ -1104,7 +1106,7 @@ class Pet:
                  font=('Consolas', 8)).pack(side='left')
         hf = ('Consolas', 9)
         self.c_net = tk.Label(head, bg='#ededf0', fg=FG, font=hf, anchor='w',
-                              width=21)  # 上下行合并；峰值 '↓ 1.0 GB/s ↑ 123 MB/s' 21 字符
+                              width=23)  # 上下行合并；最坏 '↓ 1023 MB/s ↑ 1023 MB/s' 23 字符
         self.c_net.pack(side='left')
         self.c_clk = tk.Label(head, bg='#ededf0', fg=DIM, font=hf,
                               width=8, anchor='e')
