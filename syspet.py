@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.6.3'
+__version__ = '2.6.4'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -116,7 +116,7 @@ def mood(pct):
 class Gauge:
     """名称 + 圆角进度条 + 数值 三列仪表，col 为起始列（双列布局）；
     full=True 跨两列拉满（末行补格，避免右列空白）"""
-    W, H, R = 95, 9, 3
+    W, H, R = 102, 7, 2
 
     def __init__(self, parent, name, row, col, font, full=False):
         self.name_lb = tk.Label(parent, text=name, bg=BG, fg=DIM, font=font,
@@ -128,7 +128,7 @@ class Gauge:
         self.cv.grid(row=row, column=col + 1, padx=(2, 5),
                      columnspan=3 if full else 1)
         self.val = tk.Label(parent, text='—', bg=BG, fg=FG,
-                            font=('Consolas', 10, 'bold'),  # 测量值：等宽+粗
+                            font=('Consolas', 9, 'bold'),  # 测量值：等宽+粗
                             width=4, anchor='e')
         self.val.grid(row=row, column=col + 5 if full else col + 2, sticky='e')
 
@@ -1135,31 +1135,29 @@ class Pet:
         r.alpha_idle = self._alpha  # 设置窗口保存时可热更新（_hover 回落用）
         r.configure(bg=BG)
         # 等宽只用于测量值；标签/路径/文案用正文字体（去"技术戏服"感）
-        f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
+        f, e_f = ('Microsoft YaHei UI', 8), ('Microsoft YaHei UI', 8)
 
         head = tk.Frame(r, bg='#e8e8ec')
-        head.pack(fill='x', ipady=3)
+        head.pack(fill='x', ipady=2)
         tk.Label(head, text='SysPet', bg='#e8e8ec', fg=FG,
-                 font=('Microsoft YaHei UI', 10, 'bold')).pack(side='left', padx=(12, 2))
-        tk.Label(head, text=f'v{__version__}', bg='#e8e8ec', fg=DIM,
-                 font=('Consolas', 8)).pack(side='left')
-        hf = ('Consolas', 9)
+                 font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 4))
+        hf = ('Consolas', 8)
         self.c_net = tk.Label(head, bg='#e8e8ec', fg=FG, font=hf, anchor='e',
                               width=23)  # 上下行合并；最坏 '↓ 1023 MB/s ↑ 1023 MB/s' 23 字符
         self.c_clk = tk.Label(head, bg='#e8e8ec', fg=DIM, font=hf,
                               width=8, anchor='e')
-        self.c_clk.pack(side='right', padx=(0, 12))
+        self.c_clk.pack(side='right', padx=(0, 10))
         self.c_day = tk.Label(head, bg='#e8e8ec', fg=DIM, font=hf,
                               width=8, anchor='e')  # 今日流量 Σ
         # 右侧数据组：网速 · 今日流量 · 时钟（先 pack 者靠右）
-        tk.Label(head, text='·', bg='#e8e8ec', fg=DIM, font=hf).pack(side='right', padx=2)
+        tk.Label(head, text='·', bg='#e8e8ec', fg=DIM, font=hf).pack(side='right')
         self.c_day.pack(side='right')
-        tk.Label(head, text='·', bg='#e8e8ec', fg=DIM, font=hf).pack(side='right', padx=2)
+        tk.Label(head, text='·', bg='#e8e8ec', fg=DIM, font=hf).pack(side='right')
         self.c_net.pack(side='right')
         self.c_day.bind('<Button-1>', lambda e: (self._show_traffic_hist(), 'break')[1])
 
         sysf = tk.Frame(r, bg=BG)
-        sysf.pack(fill='x', padx=12, pady=(12, 2))
+        sysf.pack(fill='x', padx=10, pady=(10, 2))
         self.g_cpu = Gauge(sysf, 'CPU', 0, 0, f)
         self.g_gpu = Gauge(sysf, 'GPU', 0, 3, f)
         self.g_mem = Gauge(sysf, '内存', 1, 0, f)
@@ -1174,15 +1172,15 @@ class Pet:
             wgt.bind('<Button-1>', lambda e: (self._next_disk(), 'break')[1])
         self._dsk_i = 0
         self.ai_f = tk.Frame(r, bg=BG)  # AI 用量行独立紧凑布局，不受仪表列宽影响
-        self.ai_f.pack(fill='x', padx=12, pady=(8, 2))
+        self.ai_f.pack(fill='x', padx=10, pady=(6, 2))
 
-        tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=12, pady=(8, 8))
-        self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=5, width=38,
-                           highlightthickness=0, wrap='none', spacing1=4, spacing3=4,
+        tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=10, pady=(6, 6))
+        self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=4, width=50,
+                           highlightthickness=0, wrap='none', spacing1=3, spacing3=3,
                            state='disabled', cursor='arrow')
-        self.txt.pack(fill='both', expand=True, padx=12)
-        self.txt.tag_config('ts', foreground=DIM, font=('Consolas', 9))  # 时间=测量值
-        self.txt.tag_config('mono', font=('Consolas', 9))                # 大小=测量值
+        self.txt.pack(fill='both', expand=True, padx=10)
+        self.txt.tag_config('ts', foreground=DIM, font=('Consolas', 8))  # 时间=测量值
+        self.txt.tag_config('mono', font=('Consolas', 8))                # 大小=测量值
         self.txt.tag_config('empty', foreground='#b0b0b5')
         self._show_empty()
         self.txt.tag_config('ext', foreground='#00a19b')
@@ -1202,7 +1200,7 @@ class Pet:
 
         self.hint = tk.Label(r, bg=BG, fg=DIM, font=('Microsoft YaHei UI', 8),
                              anchor='w', width=40, text=HINT)
-        self.hint.pack(fill='x', padx=12, pady=(4, 10))
+        self.hint.pack(fill='x', padx=10, pady=(4, 8))
 
         menu = tk.Menu(r, tearoff=0)
         menu.add_command(label=f'SysPet v{__version__}', state='disabled')
@@ -1642,10 +1640,10 @@ class Pet:
             row = tk.Frame(self.ai_f, bg=BG)
             row.pack(fill='x')
             n = tk.Label(row, text=f'{name[:6]}', bg=BG, fg=DIM, width=7,
-                         font=('Microsoft YaHei UI', 9), anchor='w')
+                         font=('Microsoft YaHei UI', 8), anchor='w')
             n.pack(side='left')
             v = tk.Label(row, text=val or '查询失败', bg=BG, fg=FG,
-                         font=('Microsoft YaHei UI', 9), anchor='w')
+                         font=('Microsoft YaHei UI', 8), anchor='w')
             v.pack(side='left', fill='x', expand=True, padx=(8, 0))  # 拉满剩余宽度
             self._ai_rows += [row]
 
