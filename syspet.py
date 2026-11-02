@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.6.4'
+__version__ = '2.6.5'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -528,9 +528,15 @@ def check_update(events):
         pass  # 离线/接口变更是常态，静默
 
 
+_toast_on = True  # 系统通知总开关（设置窗口可改；关闭后事件流照常记录）
+
+
 def toast(title, body):
     """弹 Windows 原生通知（PowerShell WinRT；后台线程执行防阻塞 UI；
     无控制台父进程的子进程 stdio 必须显式重定向，否则 PowerShell 挂起）"""
+    if not _toast_on:
+        return
+
     def run():
         try:
             with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
@@ -940,6 +946,12 @@ class AICfg(tk.Toplevel):
         self.e_rest.insert(0, cfg.get('rest', 45))
         self.e_alpha = self._field(c3, '待机透明度 %（5-95，默认 72；悬停恒清晰）', F, short=True)
         self.e_alpha.insert(0, cfg.get('alpha', 72))
+        self.toast_var = tk.BooleanVar(value=bool(cfg.get('toast', True)))
+        tk.Checkbutton(c3, text='弹 Windows 系统通知（关闭后仅记录到事件流）',
+                       variable=self.toast_var, bg=self.CARD, fg=self.WFG,
+                       activebackground=self.CARD, activeforeground=self.WFG,
+                       selectcolor='#f7f7f9', font=(F, 9), anchor='w',
+                       highlightthickness=0, bd=0).pack(fill='x', padx=10, pady=(6, 0))
         tk.Frame(c3, bg=self.CARD).pack(fill='x', pady=(0, 8))
 
         bot = tk.Frame(self, bg=self.WBG)
@@ -1074,6 +1086,9 @@ class AICfg(tk.Toplevel):
         cfg['ai_alert'] = int(alert)
         cfg['rest'] = int(rest)
         cfg['alpha'] = int(alpha)
+        cfg['toast'] = bool(self.toast_var.get())
+        global _toast_on  # 保存即生效
+        _toast_on = cfg['toast']
         cfg_write(cfg)
         self.master.attributes('-alpha', int(alpha) / 100)  # 透明度立即生效
         self.master.alpha_idle = int(alpha) / 100  # 悬停离开后回落到新值
@@ -1125,6 +1140,8 @@ class Pet:
         self._rest_n = 0
         self._rest_reminded, self._last_rem_n = False, 0  # 催促状态与上次提醒计数
         self._alpha = max(0.05, int(_cfg.get('alpha', 72) or 72) / 100)  # 待机透明度
+        global _toast_on
+        _toast_on = bool(_cfg.get('toast', True))  # 系统通知开关
         self.ai_state['rows'] = [(x.get('name', '?'), '…') for x in _p]
         self.ai_state['ver'] += 1
 
