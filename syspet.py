@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '2.6.2'
+__version__ = '2.6.3'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -872,7 +872,7 @@ def ev_text(ev):
 
 class AICfg(tk.Toplevel):
     """AI 供应商配置窗口：浅色精致风（与主悬浮窗同主题），保存写 syspet.json"""
-    WBG, WFG, DIM, LINE, ACC = '#f0f0f3', '#1d1d1f', '#86868b', '#d8d8dc', '#007aff'
+    WBG, WFG, DIM, LINE, ACC = '#f7f7f9', '#1d1d1f', '#86868b', '#d8d8dc', '#007aff'
     CARD = '#ffffff'
 
     def __init__(self, master):
@@ -934,14 +934,13 @@ class AICfg(tk.Toplevel):
 
         c3 = self._card(tab_gen)
         c3.pack(fill='x', pady=(6, 3))
-        self.e_alert = self._field(c3, '用量告警阈值 %（0=禁用，默认 90）', F)
+        self.e_alert = self._field(c3, '用量告警阈值 %（0=禁用，默认 90）', F, short=True)
         self.e_alert.insert(0, cfg.get('ai_alert', 90))
-        self.e_rest = self._field(c3, '久坐提醒间隔分钟（0=禁用，默认 45）', F)
+        self.e_rest = self._field(c3, '久坐提醒间隔分钟（0=禁用，默认 45）', F, short=True)
         self.e_rest.insert(0, cfg.get('rest', 45))
-        self.e_alpha = self._field(c3, '待机透明度 %（5-95，默认 72；悬停恒清晰）', F)
+        self.e_alpha = self._field(c3, '待机透明度 %（5-95，默认 72；悬停恒清晰）', F, short=True)
         self.e_alpha.insert(0, cfg.get('alpha', 72))
-        tk.Label(c3, text='通用项保存后立即生效', bg=self.CARD,
-                 fg=self.DIM, font=(F, 9), anchor='w', padx=10).pack(fill='x', pady=(6, 10))
+        tk.Frame(c3, bg=self.CARD).pack(fill='x', pady=(0, 8))
 
         bot = tk.Frame(self, bg=self.WBG)
         bot.pack(fill='x', padx=16, pady=(4, 12))
@@ -960,14 +959,18 @@ class AICfg(tk.Toplevel):
         c.pack(fill='x', padx=0, pady=3)
         return c
 
-    def _field(self, parent, label, f, secret=False):
+    def _field(self, parent, label, f, secret=False, short=False):
         tk.Label(parent, text=label, bg=self.CARD, fg=self.DIM, font=(f, 9)
                  ).pack(anchor='w', padx=10, pady=(8, 2))
-        e = tk.Entry(parent, bg='#f7f7f9', fg=self.WFG, bd=0, width=44, font=(f, 10),
+        e = tk.Entry(parent, bg='#f7f7f9', fg=self.WFG, bd=0,
+                     width=12 if short else 44, font=(f, 10),
                      insertbackground=self.WFG, show='●' if secret else '',
                      highlightthickness=1, highlightbackground=self.LINE,
                      highlightcolor=self.ACC)  # 聚焦时边框变蓝
-        e.pack(fill='x', padx=10)
+        if short:
+            e.pack(anchor='w', padx=10)
+        else:
+            e.pack(fill='x', padx=10)
         return e
 
     def _refresh(self):
@@ -1134,26 +1137,29 @@ class Pet:
         # 等宽只用于测量值；标签/路径/文案用正文字体（去"技术戏服"感）
         f, e_f = ('Microsoft YaHei UI', 9), ('Microsoft YaHei UI', 9)
 
-        head = tk.Frame(r, bg='#ededf0')
+        head = tk.Frame(r, bg='#e8e8ec')
         head.pack(fill='x', ipady=3)
-        tk.Label(head, text='SysPet', bg='#ededf0', fg=DIM,
-                 font=('Microsoft YaHei UI', 9, 'bold')).pack(side='left', padx=(10, 2))
-        tk.Label(head, text=f'v{__version__}', bg='#ededf0', fg=DIM,
+        tk.Label(head, text='SysPet', bg='#e8e8ec', fg=FG,
+                 font=('Microsoft YaHei UI', 10, 'bold')).pack(side='left', padx=(12, 2))
+        tk.Label(head, text=f'v{__version__}', bg='#e8e8ec', fg=DIM,
                  font=('Consolas', 8)).pack(side='left')
         hf = ('Consolas', 9)
-        self.c_net = tk.Label(head, bg='#ededf0', fg=FG, font=hf, anchor='w',
+        self.c_net = tk.Label(head, bg='#e8e8ec', fg=FG, font=hf, anchor='e',
                               width=23)  # 上下行合并；最坏 '↓ 1023 MB/s ↑ 1023 MB/s' 23 字符
-        self.c_net.pack(side='left')
-        self.c_clk = tk.Label(head, bg='#ededf0', fg=DIM, font=hf,
+        self.c_clk = tk.Label(head, bg='#e8e8ec', fg=DIM, font=hf,
                               width=8, anchor='e')
-        self.c_clk.pack(side='right', padx=(0, 10))
-        self.c_day = tk.Label(head, bg='#ededf0', fg=DIM, font=hf,
+        self.c_clk.pack(side='right', padx=(0, 12))
+        self.c_day = tk.Label(head, bg='#e8e8ec', fg=DIM, font=hf,
                               width=8, anchor='e')  # 今日流量 Σ
+        # 右侧数据组：网速 · 今日流量 · 时钟（先 pack 者靠右）
+        tk.Label(head, text='·', bg='#e8e8ec', fg=DIM, font=hf).pack(side='right', padx=2)
         self.c_day.pack(side='right')
+        tk.Label(head, text='·', bg='#e8e8ec', fg=DIM, font=hf).pack(side='right', padx=2)
+        self.c_net.pack(side='right')
         self.c_day.bind('<Button-1>', lambda e: (self._show_traffic_hist(), 'break')[1])
 
         sysf = tk.Frame(r, bg=BG)
-        sysf.pack(fill='x', padx=12, pady=(12, 6))
+        sysf.pack(fill='x', padx=12, pady=(12, 2))
         self.g_cpu = Gauge(sysf, 'CPU', 0, 0, f)
         self.g_gpu = Gauge(sysf, 'GPU', 0, 3, f)
         self.g_mem = Gauge(sysf, '内存', 1, 0, f)
@@ -1170,9 +1176,9 @@ class Pet:
         self.ai_f = tk.Frame(r, bg=BG)  # AI 用量行独立紧凑布局，不受仪表列宽影响
         self.ai_f.pack(fill='x', padx=12, pady=(8, 2))
 
-        tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=12, pady=(8, 10))
+        tk.Frame(r, bg=TRACK, height=1).pack(fill='x', padx=12, pady=(8, 8))
         self.txt = tk.Text(r, bg=BG, fg=FG, font=e_f, bd=0, height=5, width=38,
-                           highlightthickness=0, wrap='none', spacing1=3, spacing3=3,
+                           highlightthickness=0, wrap='none', spacing1=4, spacing3=4,
                            state='disabled', cursor='arrow')
         self.txt.pack(fill='both', expand=True, padx=12)
         self.txt.tag_config('ts', foreground=DIM, font=('Consolas', 9))  # 时间=测量值
@@ -1196,7 +1202,7 @@ class Pet:
 
         self.hint = tk.Label(r, bg=BG, fg=DIM, font=('Microsoft YaHei UI', 8),
                              anchor='w', width=40, text=HINT)
-        self.hint.pack(fill='x', padx=14, pady=(4, 10))
+        self.hint.pack(fill='x', padx=12, pady=(4, 10))
 
         menu = tk.Menu(r, tearoff=0)
         menu.add_command(label=f'SysPet v{__version__}', state='disabled')
@@ -1323,15 +1329,15 @@ class Pet:
         w = tk.Toplevel(self.root)
         w.overrideredirect(True)
         w.attributes('-topmost', True)
-        w.configure(bg='#ededf0')
-        tk.Label(w, text=f'{kind} · 最近 1 小时 + Top 5（点击关闭）', bg='#ededf0',
+        w.configure(bg=BG)
+        tk.Label(w, text=f'{kind} · 最近 1 小时 + Top 5（点击关闭）', bg=BG,
                  fg=ACCENT, font=('Microsoft YaHei UI', 9, 'bold'), anchor='w',
                  padx=10).pack(fill='x', pady=(6, 2))
         cv = tk.Canvas(w, width=330, height=80, bg='#f7f7f9',
                        highlightthickness=1, highlightbackground='#d8d8dc')
         self._draw_hist(cv, kind)
         cv.pack(fill='x', padx=10, pady=(2, 4))
-        tk.Label(w, text='Top 5 采样中…', bg='#ededf0', fg='#b0b0b5',
+        tk.Label(w, text='Top 5 采样中…', bg=BG, fg='#b0b0b5',
                  font=('Microsoft YaHei UI', 9), anchor='w',
                  padx=10).pack(fill='x')
         w.bind('<Button-1>', lambda e: w.destroy())
@@ -1355,7 +1361,7 @@ class Pet:
                 c.destroy()
                 break
         for name, v in rows:
-            tk.Label(w, text=f'{name[:24]:24s} {v:5.1f}%', bg='#ededf0', fg=FG,
+            tk.Label(w, text=f'{name[:24]:24s} {v:5.1f}%', bg=BG, fg=FG,
                      font=('Consolas', 9), anchor='w', padx=10).pack(fill='x')
 
     def _draw_hist(self, cv, kind):
