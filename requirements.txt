@@ -1,3 +1,4 @@
 psutil>=5.9
+PySide6>=6.6,!=6.12.*  # 6.12 在 Win10 19045 加载失败，锁 6.8 LTS
 pywin32>=300
 comtypes>=1.4

@@ -4,7 +4,9 @@
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2B-0078D6.svg)]()
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg)]()
 
-Windows 桌面常驻小工具：深色半透明悬浮窗（TrafficMonitor 风格），一个窗口看尽 **系统仪表 + 全盘文件变化 + 系统通知 + AI 平台用量**。单文件绿色版，免安装。
+Windows 桌面常驻小工具：**玻璃拟态深色悬浮窗（PySide6）**，一个窗口看尽 **系统仪表 + 全盘文件变化 + 系统通知 + AI 平台用量**。单文件绿色版，免安装。
+
+> v3.0 起 UI 迁移至 PySide6（玻璃拟态：弥散光斑 + 高光描边 + 渐变发光仪表，设计规格见 `docs/UI-Redesign-Handoff.md`）；业务逻辑不变。
 
 ![主悬浮窗](docs/main.png)
 ![配置窗口](docs/config.png)
@@ -56,8 +58,9 @@ CPU / 内存 / C盘 / GPU / 显存 / **GPU 温度**（圆角进度条，随负�
 
 ### 开发者
 ```bash
-pip install -r requirements.txt   # psutil, pywin32, comtypes
-python syspet.py                  # 或双击 启动.bat
+pip install -r requirements.txt   # psutil, pywin32, comtypes, PySide6
+python app.py                     # 玻璃拟态版（v3.0+）
+python syspet.py                  # 旧版 tkinter 界面（保留）
 ```
 
 ## 配置说明（syspet.json）
@@ -113,7 +116,7 @@ python syspet.py                  # 或双击 启动.bat
 ## 打包与发布
 
 ```bash
-pyinstaller --onefile --noconsole --name syspet --icon=syspet.ico --hidden-import comtypes.stream syspet.py
+pyinstaller --onefile --noconsole --name syspet --icon=syspet.ico --hidden-import comtypes.stream app.py
 python release.py    # 打 tag + push + 创建 GitHub Release 并上传 exe（一键）
 ```
 
