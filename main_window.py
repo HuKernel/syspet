@@ -7,7 +7,7 @@ import time
 from collections import deque
 
 from PySide6.QtCore import (Qt, QTimer, QVariantAnimation, QPropertyAnimation, QSize,
-                            QPointF, QObject, Signal)
+                            QPointF, QObject, QRectF, Signal)
 from PySide6.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPen,
                            QPolygonF, QRadialGradient)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFrame, QGridLayout,
@@ -50,10 +50,6 @@ QTabWidget::pane {{ background: rgba(255,255,255,0.045); border: 1px solid rgba(
   border-radius: 12px; }}
 QTabBar::tab {{ background: transparent; color: {DIM}; padding: 6px 18px; }}
 QTabBar::tab:selected {{ color: {ACC1}; background: rgba(255,255,255,0.07); border-radius: 8px; }}
-QCheckBox {{ spacing: 6px; }}
-QCheckBox::indicator {{ width: 15px; height: 15px; border-radius: 4px; }}
-QCheckBox::indicator:unchecked {{ border: 1px solid rgba(255,255,255,0.30); background: transparent; }}
-QCheckBox::indicator:checked {{ background: {ACC1}; border: 1px solid {ACC1}; }}
 QMenu {{ background: #14161d; border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; padding: 4px; }}
 QMenu::item {{ padding: 5px 18px; border-radius: 6px; }}
 QMenu::item:selected {{ background: rgba(10,132,255,0.40); }}
@@ -161,6 +157,33 @@ class Gauge(QWidget):
 def _rgba(hex_color, a):
     return (f'rgba({int(hex_color[1:3], 16)}, {int(hex_color[3:5], 16)}, '
             f'{int(hex_color[5:7], 16)}, {a})')
+
+
+class GlassCheckBox(QCheckBox):
+    """玻璃风复选框：选中 = 蓝底 + 白对勾（QSS 纯填充画不出对勾）"""
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        box = 15
+        y = (self.height() - box) // 2
+        rect = QRectF(0.5, y + 0.5, box - 1, box - 1)
+        p.setPen(QPen(QColor(255, 255, 255, 95 if self.underMouse() else 60), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(rect, 4, 4)
+        if self.isChecked():
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(ACC1))
+            p.drawRoundedRect(rect, 4, 4)
+            pen = QPen(QColor('#ffffff'), 2)
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            p.drawLine(QPointF(4, y + 8), QPointF(6.5, y + 10.5))
+            p.drawLine(QPointF(6.5, y + 10.5), QPointF(11, y + 5))
+        p.setPen(QColor(FG))
+        p.setFont(self.font())
+        p.drawText(QRectF(box + 7, 0, self.width() - box - 7, self.height()),
+                   Qt.AlignVCenter | Qt.AlignLeft, self.text())
 
 
 class ClickableLabel(QLabel):
@@ -386,7 +409,7 @@ class SettingsDialog(QDialog):
         for i, (k, label) in enumerate((('ai', 'AI 用量告警'), ('sys', 'CPU/磁盘告警'),
                                         ('net', '网络变化'), ('usb', 'U 盘插拔'),
                                         ('rest', '久坐提醒'))):
-            cb = QCheckBox(label)
+            cb = GlassCheckBox(label)
             cb.setChecked(syspet._toast.get(k, True))
             self.toast_vars[k] = cb
             grid.addWidget(cb, i // 3, i % 3)
