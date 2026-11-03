@@ -46,9 +46,9 @@ class PetCat(QWidget):
         self.timer.timeout.connect(self._tick)
         self.timer.start(30)
 
-    # —— 窗内锚点（父内坐标）：顶部中央偏左 ——
+    # —— 窗内锚点（父内坐标）：底部中央偏左，趴窗底沿 ——
     def _dock_pos(self):
-        return (int(self.main.width() * 0.40), 2)
+        return (int(self.main.width() * 0.40), self.main.height() - SZ - 2)
 
     def _docked(self):
         return self.parent() is self.main
