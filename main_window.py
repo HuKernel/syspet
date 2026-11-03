@@ -1108,7 +1108,9 @@ class MainWindow(QWidget):
         elif n > shown:
             if shown == 0:
                 self.list.clear()
-            for ev in self.events[shown:n]:
+            # 新事件是最前面的 n-shown 条（events[0] 最新）；旧→新逐条顶插使最新置顶，
+            # 保证 row i 与 events[i] 一致（点击按行号映射文件）
+            for ev in reversed(self.events[:n - shown]):
                 self._insert_card(ev)
         elif self.events and self.events[0] is not self._top:
             self._ev_replace_first()

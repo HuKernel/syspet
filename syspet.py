@@ -23,7 +23,7 @@ except Exception:
     CUIAutomation = IUIAutomation = None
 
 log = logging.getLogger('syspet')
-__version__ = '3.0.2'
+__version__ = '3.0.4'
 # PyInstaller exe 运行时配置/日志放 exe 旁（绿色软件惯例）；脚本运行时放脚本旁
 BASE = Path(sys.executable if getattr(sys, 'frozen', False) else __file__)
 RUN_KEY = (winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Run')
@@ -60,7 +60,9 @@ def set_autostart(on):
 
 
 def setup_log():
-    """滚动文件日志：单文件 1MB × 保留 2 个备份，总量恒定约 3MB"""
+    """滚动文件日志：单文件 1MB × 保留 2 个备份，总量恒定约 3MB（幂等）"""
+    if log.handlers:
+        return
     h = RotatingFileHandler(BASE.with_suffix('.log'), maxBytes=1_000_000,
                             backupCount=2, encoding='utf-8')
     h.setFormatter(logging.Formatter(
