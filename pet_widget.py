@@ -37,6 +37,9 @@ class PetCat(QWidget):
         self.blink_at = time.time() + random.uniform(2, 5)
         self.drag_off, self.dragging, self.press_pos = None, False, None
         self._cpu_hot = False
+        # 连续体感量（每 tick 30ms 积分）：热度升≈3s、散≈5s；汗：出≈1.5s、蒸发≈10s
+        self.heat, self.sweat = 0.0, 0.0
+        self._sweat_flip = False
         # 弹簧位置（初值=屋顶）
         self.tx, self.ty = self._roof()
         self.move(round(self.tx), round(self.ty))
@@ -59,8 +62,8 @@ class PetCat(QWidget):
         s = self.state
         if self.dragging:
             s = 'love'
-        elif s == 'idle' and self._cpu_hot:
-            s = 'hot'
+        elif s == 'idle' and self.heat > 0.55:
+            s = 'flush'
         elif s == 'idle' and now >= self.blink_at:
             self.blink_at = now + random.uniform(2.5, 6)
             self.state, self.state_until = 'blink', now + 0.18
@@ -78,6 +81,14 @@ class PetCat(QWidget):
             if self.tail_t > 0.55:  # 摆尾节奏（开心时加速由 state_until 内自然覆盖）
                 self.tail_t = 0.0
                 self.tail_flip = 'b' if self.tail_flip == 'a' else 'a'
+        # 体感积分：热得慢、散得更慢；汗在热度下来后要慢慢干（≈10s）
+        self.heat = min(1.0, max(0.0,
+            self.heat + (0.012 if self._cpu_hot else -0.006)))
+        if self.heat > 0.55:
+            self.sweat = min(1.0, self.sweat + 0.02)
+        else:
+            self.sweat = max(0.0, self.sweat - 0.003)
+        self._sweat_flip = not self._sweat_flip if int(now * 2) % 2 else self._sweat_flip
         k = 0.22
         x, y = self.x(), self.y()
         self.move(round(x + (self.tx - x) * k), round(y + (self.ty - y) * k))
@@ -93,7 +104,12 @@ class PetCat(QWidget):
     def paintEvent(self, _):
         from PySide6.QtGui import QPainter
         if getattr(self, '_pm', None):
-            QPainter(self).drawPixmap(0, 0, self._pm)
+            p = QPainter(self)
+            p.drawPixmap(0, 0, self._pm)
+            if self.sweat > 0.05:  # 汗独立层：透明度=湿度（渐干），a/b 帧滚动
+                key = 'sweat_a' if not self._sweat_flip else 'sweat_b'
+                p.setOpacity(self.sweat)
+                p.drawPixmap(0, 0, self.frames[key])
 
     # —— 交互 ——
     def mousePressEvent(self, e):
