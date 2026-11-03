@@ -574,6 +574,7 @@ class MainWindow(QWidget):
         self._dsk_i = 0
         self._edge, self._hidden, self._edge_timer = None, False, None
         self._edge_pos = (0, 0)
+        self._popup = None  # Top 弹窗引用（防 GC 销毁）
         self._nproc = None
         self._breath = 0.0
         self.bridge = Bridge()
@@ -864,14 +865,15 @@ class MainWindow(QWidget):
             self._next_disk()
 
     def show_top(self, kind):
-        popup = TopPopup(self, kind)
-        popup.place_near(self)
-        popup.show()
+        # 无父顶层窗由 Python 引用拥有：局部变量随函数返回被 GC，窗口即销毁（闪没根因）
+        self._popup = TopPopup(self, kind)
+        self._popup.place_near(self)
+        self._popup.show()
+        popup = self._popup
 
         def run():
             rows = syspet.top_procs(kind)
             self.bridge.call(lambda: popup.fill(rows))
-        import threading
         threading.Thread(target=run, daemon=True).start()
 
     def _next_disk(self):
@@ -911,7 +913,7 @@ class MainWindow(QWidget):
         lines = [f"{(d['date'] + ' ') if d['date'][:4] != year else d['date'][5:] + ' '}"
                  f"↓{size(d['down'])} ↑{size(d['up'])}"
                  for d in reversed(ds)]
-        syspet.toast('流量历史（最近 3 天）', '\n'.join(lines))
+        syspet.toast('流量历史（最近 3 天）', '\n'.join(lines), cat='hist')  # 手动触发不门控
 
     def _show_empty(self):
         it = QListWidgetItem()
