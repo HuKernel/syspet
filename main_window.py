@@ -163,6 +163,18 @@ def _rgba(hex_color, a):
             f'{int(hex_color[5:7], 16)}, {a})')
 
 
+class ClickableLabel(QLabel):
+    """可点击 QLabel（Σ 流量历史入口）"""
+    clicked = Signal()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+
 class EventCard(QWidget):
     """事件卡片：左侧类别色条 + 时间/胶囊标签 + 路径(后缀高亮) + 大小"""
 
@@ -255,8 +267,8 @@ class TopPopup(QWidget):
     """Top 进程弹窗：曲线 + Top5（曲线即时显示，采样异步回填）"""
 
     def __init__(self, main, kind):
-        super().__init__(None, Qt.Popup | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)  # 不抢焦点，8 秒定时关仍在
         self.main = main
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
@@ -283,6 +295,9 @@ class TopPopup(QWidget):
             r.setFont(_mono(9))
             lay = self.layout()
             lay.insertWidget(lay.count() - 1, r)
+
+    def mousePressEvent(self, _):
+        self.close()  # Qt.Tool 不再自动关：点击弹窗任意处关闭（与旧版一致）
 
     def place_near(self, main):
         self.adjustSize()
@@ -619,7 +634,7 @@ class MainWindow(QWidget):
         self.c_net = QLabel('—')
         self.c_net.setFont(_mono(8))
         self.c_net.setFixedWidth(23 * 7)  # Consolas 8pt ≈ 7px/字符
-        self.c_day = QLabel('Σ —')
+        self.c_day = ClickableLabel('Σ —')
         self.c_day.setFont(_mono(8))
         self.c_day.setStyleSheet(f'color: {DIM};')
         self.c_day.setFixedWidth(8 * 7)
@@ -629,6 +644,7 @@ class MainWindow(QWidget):
         self.c_clk.setFixedWidth(8 * 7)
         for w in (self.c_clk, self._dot(), self.c_day, self._dot(), self.c_net):
             hl.addWidget(w, alignment=Qt.AlignRight)
+        self.c_day.clicked.connect(self._show_traffic_hist)
         root.addWidget(header)
 
         grid_host = QWidget()
@@ -885,6 +901,18 @@ class MainWindow(QWidget):
             self._armed.discard(what)
 
     # ———————— 事件流 ————————
+    def _show_traffic_hist(self):
+        """点击 Σ：toast 弹最近 3 天流量"""
+        ds = self._tr['days'][-4:-1]
+        if not ds:
+            self._flash('暂无历史流量记录')
+            return
+        year = time.strftime('%Y')
+        lines = [f"{(d['date'] + ' ') if d['date'][:4] != year else d['date'][5:] + ' '}"
+                 f"↓{size(d['down'])} ↑{size(d['up'])}"
+                 for d in reversed(ds)]
+        syspet.toast('流量历史（最近 3 天）', '\n'.join(lines))
+
     def _show_empty(self):
         it = QListWidgetItem()
         it.setSizeHint(QSize(370, 44))
