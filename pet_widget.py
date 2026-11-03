@@ -1,14 +1,13 @@
-"""SysPet 挂饰猫：趴在主窗"屋顶"的活体系统指示（docs 设计定位见对话）。
-- 弹簧跟随主窗（拖走/甩动松手自动 Q 弹归位）
-- 点击：随机表情反应（开心/惊讶/眨眼）+ 跳一下
-- 拖拽中：爱心眼
-- 空闲：呼吸 + 随机眨眼 + 摆尾
-- CPU 持续高负载：热（流汗）状态
+"""SysPet 挂饰猫 v2：趴在主窗内部（子控件），拖拽可抓出全屏甩动，松手 Q 弹回嵌。
+- 常态：主窗 child，趴窗内顶部（挡一点内容是桌宠的特权）
+- 拖拽：reparent 成独立透明窗，全屏范围甩
+- 松手：弹簧追窗内锚点，到位自动回嵌（不再有 Z 序/贴边同步/屏顶截断问题）
+- 表情/呼吸/尾巴/流动汗滴（热度-汗湿度体感模型）同前
 """
 import random
 import time
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QPoint
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget
 
@@ -20,9 +19,8 @@ SZ = 52
 
 class PetCat(QWidget):
     def __init__(self, main):
-        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        super().__init__(main)  # 常态：主窗子控件（趴窗内）
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)  # 不抢焦点
         self.main = main
         import base64
         self.frames = {}
@@ -37,29 +35,41 @@ class PetCat(QWidget):
         self.blink_at = time.time() + random.uniform(2, 5)
         self.drag_off, self.dragging, self.press_pos = None, False, None
         self._cpu_hot = False
-        # 连续体感量（每 tick 30ms 积分）：热度升≈3s、散≈5s；汗：出≈1.5s、蒸发≈10s
         self.heat, self.sweat = 0.0, 0.0
-        # 流动汗滴：(x0, y0, 速度prog/s, 相位) 各滴错开——渗出淡入→淌下→滑落淡出
         self._drops = ((11.0, 14.0, 0.28, 0.0), (42.5, 18.0, 0.20, 0.45),
                        (7.5, 19.0, 0.34, 0.75))
-        # 弹簧位置（初值=屋顶）
-        self.tx, self.ty = self._roof()
-        self.move(round(self.tx), round(self.ty))
+        self._raised_s = -1
+        self._dock_in()
         self.show()
 
-        self._pm = self._frame()  # 首帧立即可见
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(30)
 
-    # —— 屋顶锚点：主窗顶部中央偏左，猫下半身探入窗内 ——
-    def _roof(self):
-        # 常规趴顶沿；主窗贴屏幕顶部放不下时改趴底沿（爪搭主窗下边），猫始终完整可见
-        x = self.main.x() + 30
-        y_up = self.main.y() - SZ + 8
-        if y_up < 2:
-            return (x, self.main.y() + self.main.height() - 8)
-        return (x, y_up)
+    # —— 窗内锚点（父内坐标）：顶部中央偏左 ——
+    def _dock_pos(self):
+        return (int(self.main.width() * 0.40), 2)
+
+    def _docked(self):
+        return self.parent() is self.main
+
+    def _dock_in(self):
+        """回嵌主窗（瞬移到锚点）"""
+        self.setWindowFlags(Qt.Widget)  # 清除独立窗口标志
+        self.setParent(self.main)
+        self.tx, self.ty = self._dock_pos()
+        self.move(round(self.tx), round(self.ty))
+        self.raise_()
+        self.show()
+
+    def _pop_out(self, gp):
+        """抓出窗外：变独立透明窗（全屏甩动）"""
+        self.setParent(None)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.move(gp)
+        self.show()
+        self.raise_()
 
     # —— 帧选择 ——
     def _frame(self):
@@ -75,26 +85,11 @@ class PetCat(QWidget):
             self.blink_at = now + random.uniform(2.5, 6)
             self.state, self.state_until = 'blink', now + 0.18
             s = 'blink'
-        key = f'{s}_{self.tail_flip}'  # 尾巴左右帧；单帧状态（blink/wow/love）回退基础名
+        key = f'{s}_{self.tail_flip}'
         return self.frames.get(key) or self.frames.get(s)
 
-    def snap_to_roof(self):
-        """瞬移归位（贴边滑回完成后调用，避免弹簧追赶的横飘卡顿）"""
-        self.tx, self.ty = self._roof()
-        self.move(round(self.tx), round(self.ty))
-
     def _tick(self):
-        if not self.isVisible():  # 贴边隐藏期暂停，回归走 snap
-            return
-        # 弹簧逼近目标（拖拽时目标=鼠标；平时=屋顶 + 呼吸浮动）
         now = time.time()
-        if not self.dragging:
-            self.tx, self.ty = self._roof()
-            self.ty += (2 if int(now * 2) % 2 == 0 else 0)  # 呼吸 2px
-            self.tail_t += 0.03
-            if self.tail_t > 0.55:  # 摆尾节奏（开心时加速由 state_until 内自然覆盖）
-                self.tail_t = 0.0
-                self.tail_flip = 'b' if self.tail_flip == 'a' else 'a'
         # 体感积分：热得慢、散得更慢；汗在热度下来后要慢慢干（≈10s）
         self.heat = min(1.0, max(0.0,
             self.heat + (0.012 if self._cpu_hot else -0.006)))
@@ -102,20 +97,33 @@ class PetCat(QWidget):
             self.sweat = min(1.0, self.sweat + 0.02)
         else:
             self.sweat = max(0.0, self.sweat - 0.003)
-        if int(now) != getattr(self, '_raised_s', -1):  # 每秒抬一次层序
-            self._raised_s = int(now)
-            self.raise_()
-        k = 0.22
-        x, y = self.x(), self.y()
-        self.move(round(x + (self.tx - x) * k), round(y + (self.ty - y) * k))
+        if not self.dragging:
+            if self._docked():
+                # 窗内：呼吸浮动 + 摆尾
+                b = self._dock_pos()
+                self.tx = b[0]
+                self.ty = b[1] + (1 if int(now * 2) % 2 else 0)
+                self.tail_t += 0.03
+                if self.tail_t > 0.55:
+                    self.tail_t = 0.0
+                    self.tail_flip = 'b' if self.tail_flip == 'a' else 'a'
+                k = 0.3
+            else:
+                # 独立态：弹簧追窗内锚点的全局位置，到位回嵌
+                g = self.main.mapToGlobal(QPoint(*self._dock_pos()))
+                self.tx, self.ty = g.x(), g.y()
+                if int(now) != self._raised_s:
+                    self._raised_s = int(now)
+                    self.raise_()
+                k = 0.22
+            x, y = self.x(), self.y()
+            self.move(round(x + (self.tx - x) * k), round(y + (self.ty - y) * k))
+            if not self._docked() and abs(x - self.tx) < 6 and abs(y - self.ty) < 6:
+                self._dock_in()
         pm = self._frame()
         if pm:
-            self.setPixmap_pm(pm)
-
-    def setPixmap_pm(self, pm):
-        # 无 QLabel：直接把 pixmap 画在 widget 上
-        self._pm = pm
-        self.update()
+            self._pm = pm
+            self.update()
 
     def paintEvent(self, _):
         from PySide6.QtGui import QPainter
@@ -143,10 +151,11 @@ class PetCat(QWidget):
     # —— 交互 ——
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
+            gp = e.globalPosition().toPoint()
             self.dragging = True
-            self.press_pos = (e.globalPosition().x(), e.globalPosition().y())
-            self.drag_off = (e.globalPosition().x() - self.x(),
-                             e.globalPosition().y() - self.y())
+            self.press_pos = (gp.x(), gp.y())
+            self.drag_off = (gp.x() - self.x(), gp.y() - self.y())
+            self._pop_out(gp - QPoint(*self.drag_off))  # 原位抓出，不跳变
             e.accept()
 
     def mouseMoveEvent(self, e):
@@ -160,12 +169,12 @@ class PetCat(QWidget):
         moved = abs(e.globalPosition().x() - self.press_pos[0]) + \
                 abs(e.globalPosition().y() - self.press_pos[1])
         self.dragging = False
-        if moved < 6:  # 视为点击：随机表情 + 跳一下
+        if moved < 6:  # 点击：表情 + 跳一下（独立态弹回逻辑接管）
             self.state = random.choice(('happy', 'wow', 'blink', 'happy'))
             self.state_until = time.time() + 1.4
-            self.ty = self._roof()[1] - 14  # 上跳，弹簧自动回落
+            g = self.main.mapToGlobal(QPoint(*self._dock_pos()))
+            self.ty = g.y() - 14
             syspet.log.info('挂饰猫: %s', self.state)
-        # 其余情况弹簧自动弹回屋顶（甩动 Q 弹感）
 
     def set_cpu_hot(self, hot):
         self._cpu_hot = hot
