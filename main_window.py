@@ -628,6 +628,9 @@ class MainWindow(QWidget):
         breath.setLoopCount(-1)
         breath.valueChanged.connect(self._on_breath)
         breath.start()
+        from pet_widget import PetCat
+        self.pet_cat = PetCat(self)  # 挂饰猫：趴屋顶，主窗持有引用
+
         self.tick_timer = QTimer(self)
         self.tick_timer.timeout.connect(self.tick)
         self.tick_timer.start(1000)
@@ -819,6 +822,7 @@ class MainWindow(QWidget):
         return edge if dist <= 6 else None
 
     def _edge_out(self):
+        self.pet_cat.hide()
         self._slide_to(*self._edge_xy())
 
     def _edge_xy(self, out=True):
@@ -832,6 +836,7 @@ class MainWindow(QWidget):
 
     def _edge_back(self):
         self._slide_to(*self._edge_xy(out=False))
+        self.pet_cat.show()
 
     def _slide_to(self, tx, ty):
         def step():
@@ -1085,6 +1090,7 @@ class MainWindow(QWidget):
                 '#ff3b30' if gt is not None else DIM)
         self.g_gput.set_value(gt, gt_c, unit='°')
         self._alert_sys('CPU', cpu, 90)
+        self.pet_cat.set_cpu_hot(cpu >= 85)
         if self._net_ck % 10 == 0:
             conn, ifs = syspet.net_connected(), syspet.net_ifaces()
             if self._net_last is not None:
