@@ -301,6 +301,10 @@ class SettingsDialog(QDialog):
         self.main = main
         self.setWindowTitle('SysPet 设置')
         self.setMinimumWidth(520)
+        self.setStyleSheet('QDialog { background-color: #14161d; } '
+                           'QListWidget#plist { background: #1c1e26; '
+                           'border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; } '
+                           'QListWidget#plist::item { padding: 3px; }')  # 深色底：白字可读
         try:
             cfg = syspet.json.loads(syspet.CFG_AI.read_text('utf-8'))
         except (OSError, ValueError):
@@ -331,6 +335,7 @@ class SettingsDialog(QDialog):
         ai_lay = QVBoxLayout(tab_ai)
         ai_lay.setContentsMargins(10, 10, 10, 10)
         self.lb = QListWidget()
+        self.lb.setObjectName('plist')
         self.lb.setFixedHeight(84)
         self.lb.itemClicked.connect(lambda _i: self._pick())
         ai_lay.addWidget(self.lb)
