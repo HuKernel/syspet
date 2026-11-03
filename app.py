@@ -12,8 +12,9 @@ import syspet
 
 def main():
     syspet.setup_log()
-    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, 'SysPetSingleInstance')
-    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)  # 默认 windll 不保留 LastError
+    kernel32.CreateMutexW(None, False, 'SysPetSingleInstance')
+    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
         syspet.toast('SysPet', '已在运行，本次启动自动退出')
         time.sleep(1.2)  # 等 toast 线程发出再退
         return
