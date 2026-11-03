@@ -39,7 +39,9 @@ class PetCat(QWidget):
         self._cpu_hot = False
         # 连续体感量（每 tick 30ms 积分）：热度升≈3s、散≈5s；汗：出≈1.5s、蒸发≈10s
         self.heat, self.sweat = 0.0, 0.0
-        self._sweat_flip = False
+        # 流动汗滴：(x0, y0, 速度prog/s, 相位) 各滴错开——渗出淡入→淌下→滑落淡出
+        self._drops = ((11.0, 14.0, 0.28, 0.0), (42.5, 18.0, 0.20, 0.45),
+                       (7.5, 19.0, 0.34, 0.75))
         # 弹簧位置（初值=屋顶）
         self.tx, self.ty = self._roof()
         self.move(round(self.tx), round(self.ty))
@@ -88,7 +90,6 @@ class PetCat(QWidget):
             self.sweat = min(1.0, self.sweat + 0.02)
         else:
             self.sweat = max(0.0, self.sweat - 0.003)
-        self._sweat_flip = not self._sweat_flip if int(now * 2) % 2 else self._sweat_flip
         if int(now) != getattr(self, '_raised_s', -1):  # 每秒抬一次层序
             self._raised_s = int(now)
             self.raise_()
@@ -109,10 +110,23 @@ class PetCat(QWidget):
         if getattr(self, '_pm', None):
             p = QPainter(self)
             p.drawPixmap(0, 0, self._pm)
-            if self.sweat > 0.05:  # 汗独立层：透明度=湿度（渐干），a/b 帧滚动
-                key = 'sweat_a' if not self._sweat_flip else 'sweat_b'
-                p.setOpacity(self.sweat)
-                p.drawPixmap(0, 0, self.frames[key])
+            if self.sweat > 0.04:  # 流动汗滴：渗出淡入→沿脸侧淌下→滑落淡出
+                from PySide6.QtGui import QColor, QPolygonF
+                from PySide6.QtCore import QPointF
+                now = time.time()
+                for x0, y0, spd, ph in self._drops:
+                    prog = (now * spd + ph) % 1.0
+                    y = y0 + prog * 12.0
+                    fade = min(prog / 0.18, 1.0) * min((1.0 - prog) / 0.25, 1.0)
+                    a = int(235 * self.sweat * fade)
+                    if a < 8:
+                        continue
+                    c = QColor(130, 195, 255, a)
+                    p.setPen(c)
+                    p.setBrush(c)
+                    p.drawPolygon(QPolygonF([QPointF(x0, y), QPointF(x0 - 2, y + 3),
+                                             QPointF(x0 + 2, y + 3)]))
+                    p.drawEllipse(QPointF(x0, y + 4.5), 2.6, 3.0)
 
     # —— 交互 ——
     def mousePressEvent(self, e):
