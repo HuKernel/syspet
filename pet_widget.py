@@ -52,7 +52,7 @@ class PetCat(QWidget):
 
     # —— 屋顶锚点：主窗顶部中央偏左，猫下半身探入窗内 ——
     def _roof(self):
-        return (self.main.x() + 34, self.main.y() - SZ * 0.45)
+        return (self.main.x() + 30, self.main.y() - SZ + 8)  # 爪底搭窗沿
 
     # —— 帧选择 ——
     def _frame(self):
@@ -89,6 +89,9 @@ class PetCat(QWidget):
         else:
             self.sweat = max(0.0, self.sweat - 0.003)
         self._sweat_flip = not self._sweat_flip if int(now * 2) % 2 else self._sweat_flip
+        if int(now) != getattr(self, '_raised_s', -1):  # 每秒抬一次层序
+            self._raised_s = int(now)
+            self.raise_()
         k = 0.22
         x, y = self.x(), self.y()
         self.move(round(x + (self.tx - x) * k), round(y + (self.ty - y) * k))
