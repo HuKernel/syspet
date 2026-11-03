@@ -54,7 +54,12 @@ class PetCat(QWidget):
 
     # —— 屋顶锚点：主窗顶部中央偏左，猫下半身探入窗内 ——
     def _roof(self):
-        return (self.main.x() + 30, self.main.y() - SZ + 8)  # 爪底搭窗沿
+        # 常规趴顶沿；主窗贴屏幕顶部放不下时改趴底沿（爪搭主窗下边），猫始终完整可见
+        x = self.main.x() + 30
+        y_up = self.main.y() - SZ + 8
+        if y_up < 2:
+            return (x, self.main.y() + self.main.height() - 8)
+        return (x, y_up)
 
     # —— 帧选择 ——
     def _frame(self):
