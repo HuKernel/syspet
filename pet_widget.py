@@ -73,7 +73,14 @@ class PetCat(QWidget):
         key = f'{s}_{self.tail_flip}'  # 尾巴左右帧；单帧状态（blink/wow/love）回退基础名
         return self.frames.get(key) or self.frames.get(s)
 
+    def snap_to_roof(self):
+        """瞬移归位（贴边滑回完成后调用，避免弹簧追赶的横飘卡顿）"""
+        self.tx, self.ty = self._roof()
+        self.move(round(self.tx), round(self.ty))
+
     def _tick(self):
+        if not self.isVisible():  # 贴边隐藏期暂停，回归走 snap
+            return
         # 弹簧逼近目标（拖拽时目标=鼠标；平时=屋顶 + 呼吸浮动）
         now = time.time()
         if not self.dragging:

@@ -836,7 +836,9 @@ class MainWindow(QWidget):
 
     def _edge_back(self):
         self._slide_to(*self._edge_xy(out=False))
-        self.pet_cat.show()
+        # 等主窗滑回完成再归位显示猫：弹簧追赶会造成横飘卡顿
+        QTimer.singleShot(230, lambda: (self.pet_cat.snap_to_roof(),
+                                        self.pet_cat.show()))
 
     def _slide_to(self, tx, ty):
         def step():
