@@ -15,6 +15,7 @@ from pet_assets import PET_B64
 import syspet
 
 SZ = 52
+THRESH = 12  # 拖拽脱嵌阈值 px（人手点击自然抖动约 5-10px，须高于其上限）
 
 
 class PetCat(QWidget):
@@ -106,7 +107,7 @@ class PetCat(QWidget):
             gp = QCursor.pos()
             if not self._popped:
                 moved0 = abs(gp.x() - self.press_pos[0]) + abs(gp.y() - self.press_pos[1])
-                if moved0 > 4:  # 确认真拖动才脱嵌（原位，坐标映射在 child 态完成）
+                if moved0 > THRESH:  # 超过点击抖动上限才脱嵌（原位，坐标映射在 child 态完成）
                     top_left = self.mapToGlobal(QPoint(0, 0))
                     self.drag_off = (gp.x() - top_left.x(), gp.y() - top_left.y())
                     self._pop_out(top_left)
@@ -209,7 +210,9 @@ class PetCat(QWidget):
             ly = max(0, min(cy - SZ // 2 - m.y(), self.main.height() - SZ))
             self._custom_anchor = (lx, ly)
         moved = abs(gp.x() - self.press_pos[0]) + abs(gp.y() - self.press_pos[1])
-        if moved < 6:  # 点击：表情 + 原地跳（child 态不脱嵌直接跳；独立态飞回锚点上方）
+        if moved <= THRESH and self._popped:
+            self._dock_in()  # 抖动级位移却已脱嵌：立即回嵌原锚点，净漂移归零
+        if moved <= THRESH:  # 点击：表情 + 原地跳（child 态不脱嵌直接跳；独立态飞回锚点上方）
             self.state = random.choice(('happy', 'wow', 'blink', 'happy'))
             self.state_until = time.time() + 1.4
             if self._popped:
