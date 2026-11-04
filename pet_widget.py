@@ -34,6 +34,7 @@ class PetCat(QWidget):
         self.tail_flip, self.tail_t = 'a', 0.0
         self.blink_at = time.time() + random.uniform(2, 5)
         self.drag_off, self.dragging, self.press_pos = None, False, None
+        self._popped = False
         self._cpu_hot = False
         self.heat, self.sweat = 0.0, 0.0
         self._drops = ((11.0, 14.0, 0.28, 0.0), (42.5, 18.0, 0.20, 0.45),
@@ -101,13 +102,23 @@ class PetCat(QWidget):
 
     def _tick(self):
         now = time.time()
-        if self.dragging:  # 轮询驱动拖动：脱嵌(setParent 重建句柄)会丢鼠标抓取，
-            gp = QCursor.pos()  # 事件不再派发，必须读全局鼠标状态
-            self.tx = gp.x() - self.drag_off[0]
-            self.ty = gp.y() - self.drag_off[1]
-            self.move(round(self.tx), round(self.ty))
-            if not QApplication.mouseButtons() & Qt.LeftButton:
-                self._end_drag(gp)
+        if self.dragging:  # 轮询驱动：脱嵌会丢鼠标抓取，必须读全局鼠标状态
+            gp = QCursor.pos()
+            if not self._popped:
+                moved0 = abs(gp.x() - self.press_pos[0]) + abs(gp.y() - self.press_pos[1])
+                if moved0 > 4:  # 确认真拖动才脱嵌（原位，坐标映射在 child 态完成）
+                    top_left = self.mapToGlobal(QPoint(0, 0))
+                    self.drag_off = (gp.x() - top_left.x(), gp.y() - top_left.y())
+                    self._pop_out(top_left)
+                    self._popped = True
+                elif not QApplication.mouseButtons() & Qt.LeftButton:
+                    self._end_drag(gp)  # 未拖即松 = 点击，child 态处理
+            else:
+                self.tx = gp.x() - self.drag_off[0]
+                self.ty = gp.y() - self.drag_off[1]
+                self.move(round(self.tx), round(self.ty))
+                if not QApplication.mouseButtons() & Qt.LeftButton:
+                    self._end_drag(gp)
         # 体感积分：热得慢、散得更慢；汗在热度下来后要慢慢干（≈10s）
         self.heat = min(1.0, max(0.0,
             self.heat + (0.012 if self._cpu_hot else -0.006)))
@@ -117,10 +128,12 @@ class PetCat(QWidget):
             self.sweat = max(0.0, self.sweat - 0.003)
         if not self.dragging:
             if self._docked():
-                # 窗内：呼吸浮动 + 摆尾
+                # 窗内：呼吸浮动 + 摆尾 + 点击表情期上跳
                 b = self._dock_pos()
                 self.tx = b[0]
-                self.ty = b[1] + (1 if int(now * 2) % 2 else 0)
+                hop = 10 if (self.state in ('happy', 'wow')
+                             and self.state_until > now) else 0
+                self.ty = b[1] - hop + (1 if int(now * 2) % 2 else 0)
                 self.tail_t += 0.03
                 if self.tail_t > 0.55:
                     self.tail_t = 0.0
@@ -168,13 +181,11 @@ class PetCat(QWidget):
 
     # —— 交互 ——
     def _begin_drag(self, gp):
-        """脱嵌开始拖拽。gp=鼠标全局坐标。必须在 setParent 前做坐标映射：
-        child 态的 self.x() 是父内坐标，直接当全局用会把猫瞬移到屏幕左侧"""
-        top_left = self.mapToGlobal(QPoint(0, 0))  # 抓出前的真实全局左上角
+        """按下：仅记录（不脱嵌）。真正移动 >4px 才 _pop_out——
+        点击场景零窗口重建，彻底规避 reparent 坐标/抓取陷阱"""
         self.dragging = True
+        self._popped = False
         self.press_pos = (gp.x(), gp.y())
-        self.drag_off = (gp.x() - top_left.x(), gp.y() - top_left.y())
-        self._pop_out(top_left)  # 原位脱嵌，不跳变
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -198,11 +209,12 @@ class PetCat(QWidget):
             ly = max(0, min(cy - SZ // 2 - m.y(), self.main.height() - SZ))
             self._custom_anchor = (lx, ly)
         moved = abs(gp.x() - self.press_pos[0]) + abs(gp.y() - self.press_pos[1])
-        if moved < 6:  # 点击：表情 + 跳一下（弹簧弹回逻辑接管）
+        if moved < 6:  # 点击：表情 + 原地跳（child 态不脱嵌直接跳；独立态飞回锚点上方）
             self.state = random.choice(('happy', 'wow', 'blink', 'happy'))
             self.state_until = time.time() + 1.4
-            g = self.main.mapToGlobal(QPoint(*self._dock_pos()))
-            self.ty = g.y() - 14
+            if self._popped:
+                g = self.main.mapToGlobal(QPoint(*self._dock_pos()))
+                self.tx, self.ty = g.x(), g.y() - 14  # tx 一并覆盖，杜绝残留脏值
             syspet.log.info('挂饰猫: %s', self.state)
 
     def mouseReleaseEvent(self, e):
