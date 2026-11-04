@@ -66,7 +66,12 @@ class Bridge(QObject):
 
     def __init__(self):
         super().__init__()
-        self.sig.connect(lambda fn: fn())
+        # 必须连成员方法：连裸 lambda 无 QObject receiver，后台线程 emit 会退化
+        # DirectConnection，slot 在后台线程执行（跨线程操作 widget 会偶发崩溃）
+        self.sig.connect(self._run)
+
+    def _run(self, fn):
+        fn()
 
     def call(self, fn):
         self.sig.emit(fn)
@@ -152,11 +157,6 @@ class Gauge(QWidget):
 
     def set_name(self, name):
         self._name.setText(name)
-
-
-def _rgba(hex_color, a):
-    return (f'rgba({int(hex_color[1:3], 16)}, {int(hex_color[3:5], 16)}, '
-            f'{int(hex_color[5:7], 16)}, {a})')
 
 
 class GlassCheckBox(QCheckBox):
@@ -1055,7 +1055,11 @@ class MainWindow(QWidget):
         self.list.insertItem(0, it)
         self.list.setItemWidget(it, EventCard(ev))
         if self.list.count() > KEEP:
-            self.list.takeItem(self.list.count() - 1)
+            row = self.list.count() - 1
+            w = self.list.itemWidget(self.list.item(row))  # 先取引用
+            self.list.takeItem(row)
+            if w:  # takeItem 只移除 item，不释放 setItemWidget 绑定的卡片
+                w.deleteLater()
 
     def _ev_click(self, item):
         row = self.list.row(item)
@@ -1124,9 +1128,6 @@ class MainWindow(QWidget):
     def _notify_spawn(self):
         import subprocess
         cmd = [syspet.sys.executable] + ([] if getattr(syspet.sys, 'frozen', False)
-                                          else [str(syspet.Path(syspet.__file__).resolve())]) \
-            if not getattr(syspet.sys, 'frozen', False) else [syspet.sys.executable]
-        cmd = [syspet.sys.executable] + ([] if getattr(syspet.sys, 'frozen', False)
                                          else [str(syspet.Path(syspet.__file__).resolve())]) \
             + ['--notify']
         try:
@@ -1171,10 +1172,10 @@ class MainWindow(QWidget):
         if self._tr['days'][-1]['date'] != today:
             self._tr = syspet.traffic_load()
         cur = self._tr['days'][-1]
-        if self._io:
-            cur['down'] += max(0, io.bytes_recv - self._io.bytes_recv)
-            cur['up'] += max(0, io.bytes_sent - self._io.bytes_sent)
-        self._io, self._t = io, t
+        d, u = syspet.traffic_delta(self._io, io)  # 累计用精确字节增量
+        cur['down'] += d
+        cur['up'] += u
+        self._io, self._t = io, t  # 必须在累计之后更新，否则差值恒 0（v2.1.0 引入的 bug）
         self._tr_tick += 1
         if self._tr_tick >= 300:
             self._tr_tick = 0
