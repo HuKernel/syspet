@@ -64,6 +64,12 @@ push_event(_ev2, TS, '修改', 'syspet.log', 1, 2, 'E:\\桌面\\syspet\\syspet.l
 push_event(_ev2, TS, '修改', 'app.log', 1, 2, 'E:\\桌面\\app.log')
 push_event(_ev2, TS, '修改', 'a.txt', 1, 2, 'E:\\桌面\\a.txt')
 assert len(_ev2) == 1 and _ev2[0][2] == 'a.txt', _ev2
+# 合并时间窗：窗内（同文件相邻）合并成一条；跨窗（关-开-改的会话边界）各自成条
+push_event(_ev2, TS, '修改', 'a.txt', 2, 3, 'E:\\桌面\\a.txt')
+assert len(_ev2) == 1 and _ev2[0][4] == 3  # 2 分钟内：合并，刷新大小
+_ev2[0] = _ev2[0][:7] + (time.time() - syspet.MERGE_SEC - 1,)  # 顶条拨回窗外
+push_event(_ev2, TS, '修改', 'a.txt', 3, 4, 'E:\\桌面\\a.txt')
+assert len(_ev2) == 2 and _ev2[0][4] == 4, _ev2  # 超窗：新开一条
 syspet._only = ()
 
 # 通知事件：不受白名单/黑名单过滤（非文件），显示无大小列
@@ -151,7 +157,7 @@ tags = [e[1] for e in ev]
 assert tags == ['新增', '删除', '改名', '改名', '修改', '修改', '新增'], tags
 assert ev[3][2] == 'a.txt → b.txt' and ev[2][2] == 'b.txt → c.txt'
 assert ev[3][5] == drive + 'b.txt' and ev[2][5] == drive + 'c.txt'  # 改名点击打开新路径
-assert all(len(e) == 7 for e in ev)  # 元组统一带第 7 位（对比数据，可 None）
+assert all(len(e) == 8 for e in ev)  # 元组统一带第 7 位对比数据、第 8 位 epoch（合并时间窗）
 # 修改对比快照：a.txt 两次修改合并后，保留串首 before + 最新 after
 assert ev[5][6] == ('1', '22'), ev[5]
 assert ev[4][6] is None  # 不存在文件的修改（其他.tmp）无对比数据

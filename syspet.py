@@ -73,6 +73,7 @@ def setup_log():
         '线程异常', exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 
 KEEP = 200
+MERGE_SEC = 120  # 相邻同文件修改合并的时间窗：窗口内连续保存合并防刷屏，跨会话各自成条
 TS_FMT = '%y-%m-%d %H:%M'  # 事件时间戳：年月日时分（隔天可分辨）
 HINT = '点事件打开 · 拖到屏幕边缘隐藏 · 右键'
 BG, FG, DIM = '#f7f7f9', '#1d1d1f', '#86868b'
@@ -773,8 +774,9 @@ def drives():
 
 
 def push_event(events, ts, tag, path, old, new, open_path, diff=None):
+    now = time.time()
     if tag in ('通知', '告警'):  # 非文件事件，不走路径过滤（白名单模式下也要显示）
-        events.insert(0, (ts, tag, path, old, new, open_path, None))
+        events.insert(0, (ts, tag, path, old, new, open_path, None, now))
         del events[KEEP:]
         log.info('%s %s', tag, path)
         return
@@ -784,14 +786,15 @@ def push_event(events, ts, tag, path, old, new, open_path, diff=None):
     # 全部 .log 排除（应用日志高频刷写易刷屏；syspet.log 曾致"写日志→事件→再写日志"死循环）
     if p.endswith('.log') or any(x in p for x in _excludes):
         return
-    if events and events[0][1] == tag and events[0][2] == path:  # 相邻同文件同类型合并
+    if (events and events[0][1] == tag and events[0][2] == path
+            and now - events[0][7] <= MERGE_SEC):  # 相邻同文件同类型且在时间窗内
         old_diff = events[0][6] if len(events[0]) > 6 else None
         if diff and old_diff:  # 连续修改：保留这串的最初 before，配最新 after
             diff = (old_diff[0] if old_diff[0] is not None else diff[0], diff[1])
         events[0] = (ts, tag, path, events[0][3] or old, new, open_path,
-                     diff or old_diff)
+                     diff or old_diff, now)
     else:
-        events.insert(0, (ts, tag, path, old, new, open_path, diff))
+        events.insert(0, (ts, tag, path, old, new, open_path, diff, now))
         del events[KEEP:]
     log.info('%s %s  %s → %s', tag, path, size(old), size(new))
 
