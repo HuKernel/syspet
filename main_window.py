@@ -9,7 +9,8 @@ from collections import deque
 from PySide6.QtCore import (Qt, QTimer, QVariantAnimation, QPropertyAnimation, QSize,
                             QPointF, QObject, QRectF, Signal)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QLinearGradient, QPainter,
-                           QPen, QPolygonF, QRadialGradient, QTextCursor, QTextFormat)
+                           QPainterPath, QPen, QPolygonF, QRadialGradient, QTextCursor,
+                           QTextFormat)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
@@ -862,6 +863,11 @@ class MainWindow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = self.rect().adjusted(0, 0, -1, -1)
+        # 全部绘制裁进圆角内：弥散光斑的巨椭圆渐变到角落 alpha 不为 0，
+        # 不裁剪会在圆角外的透明区染出淡色"直角"残影
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(r), 16, 16)
+        p.setClipPath(clip)
         p.setPen(Qt.NoPen)
         p.setBrush(WIN_BG)
         p.drawRoundedRect(r, 16, 16)
