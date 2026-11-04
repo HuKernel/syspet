@@ -47,13 +47,19 @@ class PetCat(QWidget):
         self.timer.timeout.connect(self._tick)
         self.timer.start(30)
 
-    # —— 窗内锚点（父内坐标）：默认=窗底中央（每次动态算，布局后才正确）；
-    # 用户在窗内放手后固化为自定义锚（记忆放置位置） ——
+    # —— 窗内锚点（父内坐标）：默认锚随主窗位置自适应（v3.1.5 逻辑的窗内版）——
+    # 主窗贴屏幕底部（压任务栏/贴边）→ 猫爬到窗口顶部；常规 → 趴窗底。
+    # 每次动态计算，主窗拖动时猫实时换边；用户在窗内放手后固化为自定义锚 ——
     def _dock_pos(self):
-        if self._custom_anchor is None:
-            return (int(self.main.width() * 0.40),
-                    self.main.height() - SZ - 2)
-        return self._custom_anchor
+        if self._custom_anchor is not None:
+            return self._custom_anchor
+        x = int(self.main.width() * 0.40)
+        try:
+            avail = self.screen().availableGeometry()
+            at_bottom = self.main.geometry().bottom() >= avail.bottom() - 4
+        except Exception:
+            at_bottom = False
+        return (x, 2) if at_bottom else (x, self.main.height() - SZ - 2)
 
     def _docked(self):
         return self.parent() is self.main
