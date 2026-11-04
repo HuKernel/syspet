@@ -119,19 +119,30 @@ d.mkdir(exist_ok=True)
 drive = str(d.resolve()) + os.sep  # 绝对路径：白名单模式下相对路径会被误拦
 ev, cache, pending, snaps = [], {}, {}, {}
 
-(d / 'a.txt').write_text('1')
+
+def rio(fn, *a):
+    """文件操作带重试：运行中的 syspet.exe 监控线程会短暂持有共享读锁（做内容快照）"""
+    for _ in range(10):
+        try:
+            return fn(*a)
+        except PermissionError:
+            time.sleep(0.05)
+    return fn(*a)
+
+
+rio((d / 'a.txt').write_text, '1')
 handle_batch([(1, 'a.txt'), (3, 'a.txt')], drive, ev, cache, pending, snaps)   # 新增 + 紧随写入
-(d / 'a.txt').write_text('22')
+rio((d / 'a.txt').write_text, '22')
 handle_batch([(3, 'a.txt')], drive, ev, cache, pending, snaps)                  # 修改（相邻合并）
-(d / 'a.txt').rename(d / 'b.txt')
+rio((d / 'a.txt').rename, d / 'b.txt')
 handle_batch([(4, 'a.txt'), (3, '其他.tmp'), (5, 'b.txt')],                     # 改名中间被隔开
              drive, ev, cache, pending, snaps)
-(d / 'b.txt').rename(d / 'c.txt')
+rio((d / 'b.txt').rename, d / 'c.txt')
 handle_batch([(4, 'b.txt')], drive, ev, cache, pending, snaps)                  # 改名旧名先到
 handle_batch([(5, 'c.txt')], drive, ev, cache, pending, snaps)                  # 新名下一批才到
-(d / 'c.txt').unlink()
+rio((d / 'c.txt').unlink)
 handle_batch([(2, 'c.txt')], drive, ev, cache, pending, snaps)                  # 删除
-(d / '孤.txt').write_text('9')
+rio((d / '孤.txt').write_text, '9')
 handle_batch([(5, '孤.txt')], drive, ev, cache, pending, snaps)                 # 无旧名的新名→新增
 
 for e in ev:
@@ -146,11 +157,6 @@ assert ev[5][6] == ('1', '22'), ev[5]
 assert ev[4][6] is None  # 不存在文件的修改（其他.tmp）无对比数据
 # 快照池生命周期：新增建基线、改名迁移、删除清理
 assert snaps == {drive + '孤.txt': '9'}, snaps
-for _ in range(20):  # 运行中的 syspet.exe 监控线程可能正读该文件做快照（共享锁）
-    try:
-        (d / '孤.txt').unlink()
-        break
-    except PermissionError:
-        time.sleep(0.05)
+rio((d / '孤.txt').unlink)
 d.rmdir()
 print('ok')

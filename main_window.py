@@ -9,11 +9,11 @@ from collections import deque
 from PySide6.QtCore import (Qt, QTimer, QVariantAnimation, QPropertyAnimation, QSize,
                             QPointF, QObject, QRectF, Signal)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QLinearGradient, QPainter,
-                           QPen, QPolygonF, QRadialGradient)
+                           QPen, QPolygonF, QRadialGradient, QTextCursor, QTextFormat)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
-                               QTabWidget, QVBoxLayout, QWidget)
+                               QTabWidget, QTextEdit, QVBoxLayout, QWidget)
 
 import syspet
 from syspet import HINT, KEEP, TS_FMT, clip_path, size, speed, split_ext
@@ -558,7 +558,9 @@ class SettingsDialog(QDialog):
 
 
 class DiffDialog(QDialog):
-    """修改对比：左"修改前"右"修改后"只读视图，可选中复制或一键复制整侧"""
+    """修改对比：左"修改前"右"修改后"只读视图，可选中复制或一键复制整侧；
+    变更行高亮（前=红 后=绿，git diff 风格）"""
+    DIFF_MAX_LINES = 8000  # 行级 diff 上限：超过跳过高亮防卡顿（32KB 快照的极端行长）
 
     def __init__(self, main, ts, path, before, after):
         super().__init__(main)
@@ -588,6 +590,7 @@ class DiffDialog(QDialog):
             body.addLayout(col, 1)
             self._panes[title] = (te, text)
         lay.addLayout(body, 1)
+        self._highlight_diff()
         row = QHBoxLayout()
         for title in ('修改前', '修改后'):
             b = QPushButton(f'复制{title}')
@@ -598,6 +601,39 @@ class DiffDialog(QDialog):
         b.clicked.connect(self.close)
         row.addWidget(b)
         lay.addLayout(row)
+
+    def _highlight_diff(self):
+        """行级差异高亮：删除/替换行标前栏红，新增/替换行标后栏绿"""
+        import difflib
+        before, after = (self._panes[t][1] for t in ('修改前', '修改后'))
+        if before is None or after is None:  # 单侧无快照：占位提示已足够
+            return
+        a, b = before.splitlines(), after.splitlines()
+        if min(len(a), len(b)) > self.DIFF_MAX_LINES:
+            return
+        pre, post = [], []
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b).get_opcodes():
+            if op in ('delete', 'replace'):
+                pre.extend(range(i1, i2))
+            if op in ('insert', 'replace'):
+                post.extend(range(j1, j2))
+        self._hl_lines(self._panes['修改前'][0], pre, QColor(255, 69, 58, 46))
+        self._hl_lines(self._panes['修改后'][0], post, QColor(48, 209, 88, 46))
+
+    @staticmethod
+    def _hl_lines(te, lines, color):
+        sels = []
+        for ln in lines:
+            if ln >= te.document().blockCount():
+                continue
+            s = QTextEdit.ExtraSelection()
+            s.format.setBackground(color)
+            s.format.setProperty(QTextFormat.FullWidthSelection, True)
+            c = QTextCursor(te.document().findBlockByNumber(ln))
+            c.select(QTextCursor.BlockUnderCursor)
+            s.cursor = c
+            sels.append(s)
+        te.setExtraSelections(sels)
 
     def _copy(self, which):
         text = self._panes[which][1]

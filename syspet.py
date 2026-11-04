@@ -440,10 +440,17 @@ def parse_used_pct(text):
 
 
 def cfg_write(cfg):
-    """原子写 syspet.json：先写 .tmp 再替换，防写入中断留下半截 JSON 丢配置"""
+    """原子写 syspet.json：先写 .tmp 再替换，防写入中断留下半截 JSON 丢配置。
+    replace 带重试：自身监控线程做内容快照的共享读锁会让 rename 短暂失败"""
     tmp = CFG_AI.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
-    os.replace(tmp, CFG_AI)
+    for _ in range(5):
+        try:
+            os.replace(tmp, CFG_AI)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    os.replace(tmp, CFG_AI)  # 仍失败则如实抛出
 
 
 def cfg_update(**patch):
@@ -732,8 +739,11 @@ SNAP_FILES = 1000      # 快照池上限：超限整体清空（与大小 cache 
 
 def snap_text(path, sz):
     """读小文本文件内容做"修改前"快照；超大/二进制/读失败返回 None。
-    sz 为 fsize 结果：已保证 ≤SNAP_MAX 的文件读取时不会被截断。"""
+    sz 为 fsize 结果：已保证 ≤SNAP_MAX 的文件读取时不会被截断。
+    自身配置排除：读它会与 cfg_write 的原子替换互相卡（共享锁 vs rename）。"""
     if sz is None or sz > SNAP_MAX:
+        return None
+    if os.path.abspath(path).lower() == os.path.abspath(CFG_AI).lower():
         return None
     try:
         data = open(path, 'rb').read(SNAP_MAX)
