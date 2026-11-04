@@ -250,6 +250,9 @@ class EventCard(QWidget):
             row2.addWidget(sz)
         col.addLayout(row2)
         lay.addLayout(col)
+        # 悬浮显示完整路径：卡片空间有限，clip_path 截断会吃掉后缀/中段
+        self.setToolTip(path if tag in ('通知', '告警')
+                        else f'{ev[5]}\n{size(old)} → {size(new)}')
         self.setStyleSheet(f'background: {_rgba("#ffffff", 0.055)};'
                            f'border: 1px solid {_rgba("#ffffff", 0.10)};'
                            f'border-radius: 10px;')
