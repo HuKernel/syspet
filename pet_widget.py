@@ -1,12 +1,15 @@
-"""SysPet 挂饰猫 v3（简化重构）：窗内子控件，拖拽=Qt 原生抓取（无脱嵌）。
-- 默认趴窗底（主窗贴屏幕底时趴窗顶）；拖到哪趴到哪（夹紧在窗内）
-- 点击=随机表情；CPU ≥85% 热脸+流动汗滴（湿度 ~10s 蒸干）
-- 精灵帧 base64 内嵌（pet_assets.py）"""
+"""SysPet 挂饰猫：趴在主窗"屋顶"的活体系统指示（docs 设计定位见对话）。
+- 弹簧跟随主窗（拖走/甩动松手自动 Q 弹归位）
+- 点击：随机表情反应（开心/惊讶/眨眼）+ 跳一下
+- 拖拽中：爱心眼
+- 空闲：呼吸 + 随机眨眼 + 摆尾
+- CPU 持续高负载：热（流汗）状态
+"""
 import random
 import time
 
-from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
-from PySide6.QtGui import QColor, QPainter, QPolygonF, QPixmap
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget
 
 from pet_assets import PET_B64
@@ -17,8 +20,9 @@ SZ = 52
 
 class PetCat(QWidget):
     def __init__(self, main):
-        super().__init__(main)  # 常态：主窗子控件（窗内趴着）
+        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)  # 不抢焦点
         self.main = main
         import base64
         self.frames = {}
@@ -31,44 +35,32 @@ class PetCat(QWidget):
         self.state, self.state_until = 'idle', 0.0
         self.tail_flip, self.tail_t = 'a', 0.0
         self.blink_at = time.time() + random.uniform(2, 5)
-        self.dragging, self.drag_off = False, None
+        self.drag_off, self.dragging, self.press_pos = None, False, None
         self._cpu_hot = False
+        # 连续体感量（每 tick 30ms 积分）：热度升≈3s、散≈5s；汗：出≈1.5s、蒸发≈10s
         self.heat, self.sweat = 0.0, 0.0
+        # 流动汗滴：(x0, y0, 速度prog/s, 相位) 各滴错开——渗出淡入→淌下→滑落淡出
         self._drops = ((11.0, 14.0, 0.28, 0.0), (42.5, 18.0, 0.20, 0.45),
                        (7.5, 19.0, 0.34, 0.75))
-        self._custom_anchor = None  # 拖放后记忆位置；None=默认锚（自适应）
-        self._pm = self.frames['idle_a']
-        self._move_to_dock()
+        # 弹簧位置（初值=屋顶）
+        self.tx, self.ty = self._roof()
+        self.move(round(self.tx), round(self.ty))
         self.show()
 
+        self._pm = self._frame()  # 首帧立即可见
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(30)
 
-    # —— 位置 ——
-    def _dock_pos(self):
-        """默认锚：窗底中央；主窗贴屏幕底（压任务栏）时翻到窗顶。
-        拖放过后记忆位置（_custom_anchor）优先。均为父内坐标。"""
-        if self._custom_anchor is not None:
-            return self._custom_anchor
-        x = int(self.main.width() * 0.40)
-        try:
-            avail = self.screen().availableGeometry()
-            at_bottom = self.main.geometry().bottom() >= avail.bottom() - 4
-        except Exception:
-            at_bottom = False
-        return (x, 2) if at_bottom else (x, self.main.height() - SZ - 2)
-
-    def _clamp_in(self, x, y):
-        """夹紧在主窗内（全身可见）"""
-        x = max(0, min(x, self.main.width() - SZ))
-        y = max(0, min(y, self.main.height() - SZ))
-        return x, y
-
-    def _move_to_dock(self):
-        x, y = self._dock_pos()
-        self._custom_anchor = None
-        self.move(x, y)
+    # —— 屋顶锚点：主窗顶部中央偏左，猫下半身探入窗内 ——
+    def _roof(self):
+        # 常规趴顶沿；主窗贴屏幕顶部放不下时改趴底沿（爪搭主窗下边），猫始终完整可见
+        x = self.main.x() + 30
+        y_up = self.main.y() - SZ + 8
+        if y_up < 2:
+            # 主窗贴屏顶：下来趴进窗内底部（在里面），非窗外底沿
+            return (x, self.main.y() + self.main.height() - SZ - 2)
+        return (x, y_up)
 
     # —— 帧选择 ——
     def _frame(self):
@@ -76,46 +68,64 @@ class PetCat(QWidget):
         if self.state_until and now > self.state_until:
             self.state, self.state_until = 'idle', 0.0
         s = self.state
-        if s == 'idle' and self.heat > 0.55:
+        if self.dragging:
+            s = 'love'
+        elif s == 'idle' and self.heat > 0.55:
             s = 'flush'
         elif s == 'idle' and now >= self.blink_at:
             self.blink_at = now + random.uniform(2.5, 6)
             self.state, self.state_until = 'blink', now + 0.18
             s = 'blink'
-        key = f'{s}_{self.tail_flip}'
+        key = f'{s}_{self.tail_flip}'  # 尾巴左右帧；单帧状态（blink/wow/love）回退基础名
         return self.frames.get(key) or self.frames.get(s)
 
-    # —— 主循环（30ms）：体感积分 + 呼吸/摆尾 ——
+    def snap_to_roof(self):
+        """瞬移归位（贴边滑回完成后调用，避免弹簧追赶的横飘卡顿）"""
+        self.tx, self.ty = self._roof()
+        self.move(round(self.tx), round(self.ty))
+
     def _tick(self):
+        if not self.isVisible():  # 贴边隐藏期暂停，回归走 snap
+            return
+        # 弹簧逼近目标（拖拽时目标=鼠标；平时=屋顶 + 呼吸浮动）
         now = time.time()
+        if not self.dragging:
+            self.tx, self.ty = self._roof()
+            self.ty += (2 if int(now * 2) % 2 == 0 else 0)  # 呼吸 2px
+            self.tail_t += 0.03
+            if self.tail_t > 0.55:  # 摆尾节奏（开心时加速由 state_until 内自然覆盖）
+                self.tail_t = 0.0
+                self.tail_flip = 'b' if self.tail_flip == 'a' else 'a'
+        # 体感积分：热得慢、散得更慢；汗在热度下来后要慢慢干（≈10s）
         self.heat = min(1.0, max(0.0,
             self.heat + (0.012 if self._cpu_hot else -0.006)))
         if self.heat > 0.55:
             self.sweat = min(1.0, self.sweat + 0.02)
         else:
             self.sweat = max(0.0, self.sweat - 0.003)
-        if not self.dragging:
-            b = self._dock_pos()
-            hop = 10 if (self.state in ('happy', 'wow')
-                         and self.state_until > now) else 0
-            self.ty = b[1] - hop + (1 if int(now * 2) % 2 else 0)  # 跳 + 呼吸
-            self.tail_t += 0.03
-            if self.tail_t > 0.55:
-                self.tail_t = 0.0
-                self.tail_flip = 'b' if self.tail_flip == 'a' else 'a'
-            k = 0.3
-            y = self.y()
-            self.move(self.x(), round(y + (self.ty - y) * k))
+        if int(now) != getattr(self, '_raised_s', -1):  # 每秒抬一次层序
+            self._raised_s = int(now)
+            self.raise_()
+        k = 0.22
+        x, y = self.x(), self.y()
+        self.move(round(x + (self.tx - x) * k), round(y + (self.ty - y) * k))
         pm = self._frame()
         if pm:
-            self._pm = pm
-            self.update()
+            self.setPixmap_pm(pm)
+
+    def setPixmap_pm(self, pm):
+        # 无 QLabel：直接把 pixmap 画在 widget 上
+        self._pm = pm
+        self.update()
 
     def paintEvent(self, _):
-        p = QPainter(self)
+        from PySide6.QtGui import QPainter
         if getattr(self, '_pm', None):
+            p = QPainter(self)
             p.drawPixmap(0, 0, self._pm)
-            if self.sweat > 0.04:  # 流动汗滴：渗出淡入→淌下→滑落淡出
+            if self.sweat > 0.04:  # 流动汗滴：渗出淡入→沿脸侧淌下→滑落淡出
+                from PySide6.QtGui import QColor, QPolygonF
+                from PySide6.QtCore import QPointF
                 now = time.time()
                 for x0, y0, spd, ph in self._drops:
                     prog = (now * spd + ph) % 1.0
@@ -131,36 +141,40 @@ class PetCat(QWidget):
                                              QPointF(x0 + 2, y + 3)]))
                     p.drawEllipse(QPointF(x0, y + 4.5), 2.6, 3.0)
 
-    # —— 拖拽（子控件原生抓取：按下后 move/release 由 Qt 保证送达，无脱嵌）——
+    # —— 交互 ——
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.dragging = True
-            self.press_gp = e.globalPosition().toPoint()
-            self.drag_off = self.press_gp - self.pos()  # 全局按下点-位置（含窗偏移）
+            self.press_pos = (e.globalPosition().x(), e.globalPosition().y())
+            self.drag_off = (e.globalPosition().x() - self.x(),
+                             e.globalPosition().y() - self.y())
             e.accept()
 
     def mouseMoveEvent(self, e):
         if self.dragging:
-            gp = e.globalPosition().toPoint()
-            # drag_off = 全局按下点 - 父内位置，故 gp - drag_off 已是父内坐标
-            x, y = self._clamp_in(gp.x() - self.drag_off.x(),
-                                  gp.y() - self.drag_off.y())
-            self.move(x, y)
-            e.accept()
+            self.tx = e.globalPosition().x() - self.drag_off[0]
+            self.ty = e.globalPosition().y() - self.drag_off[1]
 
     def mouseReleaseEvent(self, e):
         if e.button() != Qt.LeftButton:
             return
-        gp = e.globalPosition().toPoint()
-        moved = (gp - self.press_gp).manhattanLength()
+        moved = abs(e.globalPosition().x() - self.press_pos[0]) + \
+                abs(e.globalPosition().y() - self.press_pos[1])
         self.dragging = False
-        # 放置处成为新趴位（夹紧窗内）
-        self._custom_anchor = self._clamp_in(self.x(), self.y())
-        if moved < 6:  # 点击：随机表情 + 跳一下（弹簧负责起落）
+        if moved < 6:  # 视为点击：随机表情 + 跳一下
             self.state = random.choice(('happy', 'wow', 'blink', 'happy'))
             self.state_until = time.time() + 1.4
+            self.ty = self._roof()[1] - 14  # 上跳，弹簧自动回落
             syspet.log.info('挂饰猫: %s', self.state)
-        e.accept()
+        # 其余情况弹簧自动弹回屋顶（甩动 Q 弹感）
 
     def set_cpu_hot(self, hot):
         self._cpu_hot = hot
+
+    # —— 贴边收缩配合：猫独立于主窗，鼠标在猫上时主窗不知情，
+    #    转发 enter/leave 让其重判收缩（碰猫=碰窗口，离猫=离窗口） ——
+    def enterEvent(self, _):
+        self.main.enterEvent(_)
+
+    def leaveEvent(self, _):
+        self.main.leaveEvent(_)

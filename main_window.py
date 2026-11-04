@@ -8,8 +8,8 @@ from collections import deque
 
 from PySide6.QtCore import (Qt, QTimer, QVariantAnimation, QPropertyAnimation, QSize,
                             QPointF, QObject, QRectF, Signal)
-from PySide6.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPen,
-                           QPolygonF, QRadialGradient)
+from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QLinearGradient, QPainter,
+                           QPen, QPolygonF, QRadialGradient)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QPushButton, QTabWidget,
@@ -772,6 +772,8 @@ class MainWindow(QWidget):
         anim.start()
 
     def enterEvent(self, _):
+        if getattr(self, '_sliding', False):
+            return  # 滑动动画期窗口扫过鼠标产生的 enter：不算交互
         if self._edge and self._hidden:
             self._hidden = False
             if self._edge_timer:
@@ -780,14 +782,17 @@ class MainWindow(QWidget):
         self._anim_alpha(1.0)
 
     def leaveEvent(self, _):
-        gp = self.mapFromGlobal(self.cursor())
+        if getattr(self, '_sliding', False):
+            return  # 滑动动画期（含猫划过鼠标的转发）：不触发收缩
+        gp = self.mapFromGlobal(QCursor.pos())  # cursor() 是光标形状对象，须用 QCursor.pos()
         if 0 <= gp.x() < self.width() and 0 <= gp.y() < self.height():
             return  # 只是移入子控件
         self._anim_alpha(self.alpha_idle)
         if self._edge and not self._hidden:
             self._hidden = True
-            self._edge_timer = QTimer(self)
-            self._edge_timer.singleShot(800, self._edge_out)
+            self._edge_timer = QTimer(self, singleShot=True)
+            self._edge_timer.timeout.connect(self._edge_out)
+            self._edge_timer.start(800)  # 可被 enterEvent 的 stop() 取消
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -823,6 +828,9 @@ class MainWindow(QWidget):
 
     def _edge_out(self):
         self._slide_to(*self._edge_xy())
+        # 猫跟窗口一起收进去：否则它挂在屏缘（任务栏上）会被鼠标
+        # 反复碰到，enter 转发把窗口唤回——收缩/弹回死循环（页面闪缩）
+        self.pet_cat.hide()
 
     def _edge_xy(self, out=True):
         W, H = self.width(), self.height()
@@ -835,15 +843,18 @@ class MainWindow(QWidget):
 
     def _edge_back(self):
         self._slide_to(*self._edge_xy(out=False))
+        self.pet_cat.show()  # 窗口滑回，猫从屏外弹簧追回屋顶
 
     def _slide_to(self, tx, ty):
         def step():
             dx, dy = (tx - self.x()) / 3, (ty - self.y()) / 3
             if abs(dx) < 2 and abs(dy) < 2:
                 self.move(tx, ty)
+                self._sliding = False
                 return
             self.move(round(self.x() + dx), round(self.y() + dy))
             QTimer.singleShot(15, step)
+        self._sliding = True  # 动画期窗口/猫会扫过鼠标，挂起 enter/leave 防收缩唤回震荡
         step()
 
     def _ctx_menu(self):
@@ -875,7 +886,11 @@ class MainWindow(QWidget):
         QApplication.quit()
 
     def open_settings(self):
+        pet = self.pet_cat
+        pet.hide()  # 猫是置顶窗，模态设置页期间会遮挡对话框
         SettingsDialog(self).exec()
+        if not (self._edge and self._hidden):  # 窗口未处于贴边收缩态才放猫
+            pet.show()
 
     def _flash(self, msg):
         self.hint.setText(msg)
