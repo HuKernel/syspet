@@ -36,6 +36,8 @@ def _rgba(hex_color, a):
 
 QSS = f"""
 QWidget {{ color: {FG}; font-family: '{F_TEXT}'; font-size: 9pt; }}
+QToolTip {{ color: #ffffff; background: #1c1e26;
+  border: 1px solid rgba(255,255,255,0.22); border-radius: 5px; padding: 5px 9px; }}
 QPushButton {{ background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16);
   border-radius: 8px; padding: 4px 14px; }}
 QPushButton:hover {{ background: rgba(255,255,255,0.16); }}
