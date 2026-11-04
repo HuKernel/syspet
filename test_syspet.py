@@ -117,22 +117,22 @@ assert clip_path('C:\\short\\a.txt') == 'C:\\short\\a.txt'
 d = Path('test_dir')
 d.mkdir(exist_ok=True)
 drive = str(d.resolve()) + os.sep  # 绝对路径：白名单模式下相对路径会被误拦
-ev, cache, pending = [], {}, {}
+ev, cache, pending, snaps = [], {}, {}, {}
 
 (d / 'a.txt').write_text('1')
-handle_batch([(1, 'a.txt'), (3, 'a.txt')], drive, ev, cache, pending)   # 新增 + 紧随写入
+handle_batch([(1, 'a.txt'), (3, 'a.txt')], drive, ev, cache, pending, snaps)   # 新增 + 紧随写入
 (d / 'a.txt').write_text('22')
-handle_batch([(3, 'a.txt')], drive, ev, cache, pending)                  # 修改（相邻合并）
+handle_batch([(3, 'a.txt')], drive, ev, cache, pending, snaps)                  # 修改（相邻合并）
 (d / 'a.txt').rename(d / 'b.txt')
-handle_batch([(4, 'a.txt'), (3, '其他.tmp'), (5, 'b.txt')],              # 改名中间被隔开
-             drive, ev, cache, pending)
+handle_batch([(4, 'a.txt'), (3, '其他.tmp'), (5, 'b.txt')],                     # 改名中间被隔开
+             drive, ev, cache, pending, snaps)
 (d / 'b.txt').rename(d / 'c.txt')
-handle_batch([(4, 'b.txt')], drive, ev, cache, pending)                  # 改名旧名先到
-handle_batch([(5, 'c.txt')], drive, ev, cache, pending)                  # 新名下一批才到
+handle_batch([(4, 'b.txt')], drive, ev, cache, pending, snaps)                  # 改名旧名先到
+handle_batch([(5, 'c.txt')], drive, ev, cache, pending, snaps)                  # 新名下一批才到
 (d / 'c.txt').unlink()
-handle_batch([(2, 'c.txt')], drive, ev, cache, pending)                  # 删除
+handle_batch([(2, 'c.txt')], drive, ev, cache, pending, snaps)                  # 删除
 (d / '孤.txt').write_text('9')
-handle_batch([(5, '孤.txt')], drive, ev, cache, pending)                 # 无旧名的新名→新增
+handle_batch([(5, '孤.txt')], drive, ev, cache, pending, snaps)                 # 无旧名的新名→新增
 
 for e in ev:
     print(ev_text(e))
@@ -140,7 +140,17 @@ tags = [e[1] for e in ev]
 assert tags == ['新增', '删除', '改名', '改名', '修改', '修改', '新增'], tags
 assert ev[3][2] == 'a.txt → b.txt' and ev[2][2] == 'b.txt → c.txt'
 assert ev[3][5] == drive + 'b.txt' and ev[2][5] == drive + 'c.txt'  # 改名点击打开新路径
-for f in ('孤.txt',):
-    (d / f).unlink()
+assert all(len(e) == 7 for e in ev)  # 元组统一带第 7 位（对比数据，可 None）
+# 修改对比快照：a.txt 两次修改合并后，保留串首 before + 最新 after
+assert ev[5][6] == ('1', '22'), ev[5]
+assert ev[4][6] is None  # 不存在文件的修改（其他.tmp）无对比数据
+# 快照池生命周期：新增建基线、改名迁移、删除清理
+assert snaps == {drive + '孤.txt': '9'}, snaps
+for _ in range(20):  # 运行中的 syspet.exe 监控线程可能正读该文件做快照（共享锁）
+    try:
+        (d / '孤.txt').unlink()
+        break
+    except PermissionError:
+        time.sleep(0.05)
 d.rmdir()
 print('ok')

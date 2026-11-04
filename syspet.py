@@ -726,14 +726,45 @@ def fsize(path):
         return None
 
 
+SNAP_MAX = 32 * 1024   # 内容快照上限：超过的文件不做修改对比（大文件/二进制）
+SNAP_FILES = 1000      # 快照池上限：超限整体清空（与大小 cache 同策略）
+
+
+def snap_text(path, sz):
+    """读小文本文件内容做"修改前"快照；超大/二进制/读失败返回 None。
+    sz 为 fsize 结果：已保证 ≤SNAP_MAX 的文件读取时不会被截断。"""
+    if sz is None or sz > SNAP_MAX:
+        return None
+    try:
+        data = open(path, 'rb').read(SNAP_MAX)
+    except OSError:
+        return None
+    for enc in ('utf-8', 'gbk'):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return None
+
+
+def _snap_update(snapshots, path, sz):
+    """刷新快照池并返回新内容（不可快照时返回 None，不动旧值）"""
+    after = snap_text(path, sz)
+    if after is not None:
+        snapshots[path] = after
+        if len(snapshots) > SNAP_FILES:
+            snapshots.clear()
+    return after
+
+
 def drives():
     return [p.mountpoint for p in psutil.disk_partitions()
             if p.fstype not in ('CDFS', 'UDF', '')]
 
 
-def push_event(events, ts, tag, path, old, new, open_path):
+def push_event(events, ts, tag, path, old, new, open_path, diff=None):
     if tag in ('通知', '告警'):  # 非文件事件，不走路径过滤（白名单模式下也要显示）
-        events.insert(0, (ts, tag, path, old, new, open_path))
+        events.insert(0, (ts, tag, path, old, new, open_path, None))
         del events[KEEP:]
         log.info('%s %s', tag, path)
         return
@@ -744,22 +775,30 @@ def push_event(events, ts, tag, path, old, new, open_path):
     if p.endswith('.log') or any(x in p for x in _excludes):
         return
     if events and events[0][1] == tag and events[0][2] == path:  # 相邻同文件同类型合并
-        events[0] = (ts, tag, path, events[0][3] or old, new, open_path)
+        old_diff = events[0][6] if len(events[0]) > 6 else None
+        if diff and old_diff:  # 连续修改：保留这串的最初 before，配最新 after
+            diff = (old_diff[0] if old_diff[0] is not None else diff[0], diff[1])
+        events[0] = (ts, tag, path, events[0][3] or old, new, open_path,
+                     diff or old_diff)
     else:
-        events.insert(0, (ts, tag, path, old, new, open_path))
+        events.insert(0, (ts, tag, path, old, new, open_path, diff))
         del events[KEEP:]
     log.info('%s %s  %s → %s', tag, path, size(old), size(new))
 
 
-def handle_batch(batch, drive, events, cache, pending):
+def handle_batch(batch, drive, events, cache, pending, snapshots=None):
     """一批通知 [(action, 盘内相对路径)] → 事件；cache 记录路径上次大小作'前快照'；
+    snapshots 跨批持久，记小文本文件上次内容（点击修改事件可看前后对比）；
     pending 跨批暂存改名旧名，等新名到达配对（内核洪峰时 4/5 会被拆开送达）"""
+    if snapshots is None:
+        snapshots = {}
     ts = time.strftime(TS_FMT)
     now = time.time()
     for old in [k for k, t in pending.items() if now - t > 10]:
         del pending[old]  # 等不到新名的孤立旧名，放弃
     for a, name in batch:
         path = drive + name
+        diff = None
         if a == 4:                     # 改名旧名先到，暂存等配对
             pending[path] = now
             continue
@@ -769,27 +808,37 @@ def handle_batch(batch, drive, events, cache, pending):
                 del pending[old_path]
                 old_sz, new_sz = cache.pop(old_path, None), fsize(path)
                 cache[path] = new_sz
+                snap = snapshots.pop(old_path, None)  # 快照随改名迁移
+                after = _snap_update(snapshots, path, new_sz)
+                if after is None and snap is not None:
+                    snapshots[path] = snap
                 push_event(events, ts, '改名',
                            f'{old_path[len(drive):]} → {name}', old_sz, new_sz, path)
                 continue
             a = 1                      # 等不到旧名，按新增降级
         if a == 1:
             old, new = None, fsize(path)
+            _snap_update(snapshots, path, new)  # 新增即建基线，首次修改便有 before
         elif a == 3:
             if os.path.isdir(path):  # 目录条目变化无信息量，内容变化会单独报
                 continue
             old, new = cache.get(path), fsize(path)
+            before = snapshots.get(path)
+            after = _snap_update(snapshots, path, new)
+            if before is not None or after is not None:
+                diff = (before, after)
         elif a == 2:
             old, new = cache.pop(path, None), None
+            snapshots.pop(path, None)
         else:
             continue
         cache[path] = new
         if len(cache) > 50000:  # 全盘长跑上限：超限整体清空（丢失的仅前后大小快照）
             cache.clear()
-        push_event(events, ts, TAG_CN[a], path, old, new, path)
+        push_event(events, ts, TAG_CN[a], path, old, new, path, diff)
 
 
-def listen_drive(drive, events, cache):
+def listen_drive(drive, events, cache, snapshots):
     """单盘内核通知监听（阻塞式），盘移除或打开失败则退出，由管理线程重启"""
     try:
         h = win32file.CreateFileW(
@@ -810,7 +859,7 @@ def listen_drive(drive, events, cache):
                     continue
                 log.warning('%s 监听退出: %s', drive, e)
                 return
-            handle_batch(batch, drive, events, cache, pending)
+            handle_batch(batch, drive, events, cache, pending, snapshots)
     finally:
         win32file.CloseHandle(h)  # 退出路径释放目录句柄
 
@@ -839,7 +888,7 @@ def net_connected():
 
 
 def drive_manager(events, cache):
-    watched, last = {}, set()
+    watched, last, snapshots = {}, set(), {}
     while True:
         ds = set(drives())
         if last:  # 存储设备插拔（U 盘/新卷挂载），与文件监控同流
@@ -854,7 +903,8 @@ def drive_manager(events, cache):
         for d in ds:
             t = watched.get(d)
             if t is None or not t.is_alive():
-                t = threading.Thread(target=listen_drive, args=(d, events, cache), daemon=True)
+                t = threading.Thread(target=listen_drive,
+                                     args=(d, events, cache, snapshots), daemon=True)
                 watched[d] = t
                 t.start()
                 log.info('开始监听 %s', d)

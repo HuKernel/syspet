@@ -12,8 +12,8 @@ from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QLinearGradient, QPai
                            QPen, QPolygonF, QRadialGradient)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QMenu, QPushButton, QTabWidget,
-                               QVBoxLayout, QWidget)
+                               QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
+                               QTabWidget, QVBoxLayout, QWidget)
 
 import syspet
 from syspet import HINT, KEEP, TS_FMT, clip_path, size, speed, split_ext
@@ -557,6 +557,54 @@ class SettingsDialog(QDialog):
         self.status.setStyleSheet('color: #ff3b30;')
 
 
+class DiffDialog(QDialog):
+    """修改对比：左"修改前"右"修改后"只读视图，可选中复制或一键复制整侧"""
+
+    def __init__(self, main, ts, path, before, after):
+        super().__init__(main)
+        import os
+        self.setWindowTitle(f'修改对比 — {os.path.basename(path)}')
+        self.resize(880, 540)
+        self.setStyleSheet('QDialog { background-color: #14161d; } '
+                           'QPlainTextEdit { background-color: #1c1e26; color: #e8e8ec; '
+                           'border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; '
+                           'font-family: Consolas, "Microsoft YaHei UI"; }')
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        info = QLabel(f'{path}    {ts}')
+        info.setStyleSheet(f'color: {DIM};')
+        info.setWordWrap(True)
+        lay.addWidget(info)
+        body = QHBoxLayout()
+        self._panes = {}
+        for title, text in (('修改前', before), ('修改后', after)):
+            col = QVBoxLayout()
+            col.addWidget(QLabel(title))
+            te = QPlainTextEdit()
+            te.setPlainText(text if text is not None
+                            else '（无快照：文件超过 32KB / 二进制 / 修改前无记录）')
+            te.setReadOnly(True)  # 只读仍可选中 Ctrl+C
+            col.addWidget(te, 1)
+            body.addLayout(col, 1)
+            self._panes[title] = (te, text)
+        lay.addLayout(body, 1)
+        row = QHBoxLayout()
+        for title in ('修改前', '修改后'):
+            b = QPushButton(f'复制{title}')
+            b.clicked.connect(lambda _, t=title: self._copy(t))
+            row.addWidget(b)
+        row.addStretch(1)
+        b = QPushButton('关闭')
+        b.clicked.connect(self.close)
+        row.addWidget(b)
+        lay.addLayout(row)
+
+    def _copy(self, which):
+        text = self._panes[which][1]
+        if text is not None:
+            QApplication.clipboard().setText(text)
+
+
 class MainWindow(QWidget):
     """玻璃拟态主悬浮窗：深底 + 弥散光斑 + 1px 高光描边"""
 
@@ -993,6 +1041,10 @@ class MainWindow(QWidget):
                     self._flash('无法打开通知中心')
             return
         import os
+        if ev[1] == '修改' and len(ev) > 6 and ev[6]:
+            # 点击修改事件：前后对比（有快照才弹，否则回退为直接打开）
+            DiffDialog(self, ev[0], p, ev[6][0], ev[6][1]).exec()
+            return
         if os.path.exists(p):
             os.startfile(p)
         else:
