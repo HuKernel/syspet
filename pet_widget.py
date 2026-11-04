@@ -76,12 +76,15 @@ class PetCat(QWidget):
         self.show()
 
     def _pop_out(self, gp):
-        """抓出窗外：变独立透明窗（全屏甩动）"""
+        """抓出窗外：变独立透明窗（全屏甩动）。
+        必须先 hide：child 可见态直接 setParent(None) 会把父内坐标
+        当全局坐标闪现一帧在屏幕左上角（用户看到的'瞬移左边'）"""
+        self.hide()
         self.setParent(None)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.move(gp)
         self.show()
+        self.move(gp)  # 必须最后：setWindowFlags 内部会二次 setParent 并重置位置
         self.raise_()
 
     # —— 帧选择 ——
