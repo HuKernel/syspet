@@ -8,8 +8,8 @@ import random
 import time
 
 from PySide6.QtCore import Qt, QTimer, QPoint
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QCursor, QPixmap
+from PySide6.QtWidgets import QApplication, QWidget
 
 from pet_assets import PET_B64
 import syspet
@@ -90,6 +90,13 @@ class PetCat(QWidget):
 
     def _tick(self):
         now = time.time()
+        if self.dragging:  # 轮询驱动拖动：脱嵌(setParent 重建句柄)会丢鼠标抓取，
+            gp = QCursor.pos()  # 事件不再派发，必须读全局鼠标状态
+            self.tx = gp.x() - self.drag_off[0]
+            self.ty = gp.y() - self.drag_off[1]
+            self.move(round(self.tx), round(self.ty))
+            if not QApplication.mouseButtons() & Qt.LeftButton:
+                self._end_drag(gp)
         # 体感积分：热得慢、散得更慢；汗在热度下来后要慢慢干（≈10s）
         self.heat = min(1.0, max(0.0,
             self.heat + (0.012 if self._cpu_hot else -0.006)))
@@ -164,22 +171,25 @@ class PetCat(QWidget):
             e.accept()
 
     def mouseMoveEvent(self, e):
-        if self.dragging:
-            self.tx = e.globalPosition().x() - self.drag_off[0]
-            self.ty = e.globalPosition().y() - self.drag_off[1]
+        # 拖动跟随由 _tick 轮询负责（脱嵌后事件可能中断）
+        pass
 
-    def mouseReleaseEvent(self, e):
-        if e.button() != Qt.LeftButton:
+    def _end_drag(self, gp):
+        """松手（事件入口与轮询入口共用，幂等）"""
+        if not self.dragging:
             return
-        moved = abs(e.globalPosition().x() - self.press_pos[0]) + \
-                abs(e.globalPosition().y() - self.press_pos[1])
         self.dragging = False
-        if moved < 6:  # 点击：表情 + 跳一下（独立态弹回逻辑接管）
+        moved = abs(gp.x() - self.press_pos[0]) + abs(gp.y() - self.press_pos[1])
+        if moved < 6:  # 点击：表情 + 跳一下（弹簧弹回逻辑接管）
             self.state = random.choice(('happy', 'wow', 'blink', 'happy'))
             self.state_until = time.time() + 1.4
             g = self.main.mapToGlobal(QPoint(*self._dock_pos()))
             self.ty = g.y() - 14
             syspet.log.info('挂饰猫: %s', self.state)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._end_drag(e.globalPosition().toPoint())
 
     def set_cpu_hot(self, hot):
         self._cpu_hot = hot
