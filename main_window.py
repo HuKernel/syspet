@@ -655,8 +655,8 @@ class DiffDialog(QDialog):
                 pre.extend(range(i1, i2))
             if op in ('insert', 'replace'):
                 post.extend(range(j1, j2))
-        self._hl_lines(self._panes['修改前'][0], pre, QColor(255, 69, 58, 46))
-        self._hl_lines(self._panes['修改后'][0], post, QColor(48, 209, 88, 46))
+        self._hl_lines(self._panes['修改前'][0], pre, QColor(255, 69, 58, 90))
+        self._hl_lines(self._panes['修改后'][0], post, QColor(48, 209, 88, 90))
 
     @staticmethod
     def _hl_lines(te, lines, color):
