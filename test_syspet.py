@@ -154,6 +154,26 @@ assert ev[4][6] is None  # 不存在文件的修改（其他.tmp）无对比数�
 # 快照池生命周期：新增建基线、改名迁移、删除清理
 assert snaps == {drive + '孤.txt': '9'}, snaps
 rio((d / '孤.txt').unlink)
+
+# —— Office 替换式保存折叠：一次"保存"= 锁文件噪音 + 临时文件 + 让位改名 ×2 + 清理删除 ——
+ev2, cache2, pend2, evd, dom = [], {}, {}, {}, {}
+rio((d / '报告.xlsx').write_text, '旧内容行1\n旧内容行2')
+handle_batch([(1, '报告.xlsx'), (1, '~$报告.xlsx')], drive, ev2, cache2, pend2, snaps, evd, dom)
+assert len(ev2) == 1 and ev2[0][2] == drive + '报告.xlsx'  # 锁文件 ~$ 被滤，只有正常新增
+rio((d / '~RF123.tmp').write_text, '新内容行1\n新内容行2\n新内容行3')
+rio((d / '报告.xlsx').rename, d / '~RF999.tmp')
+handle_batch([(1, '~RF123.tmp'), (4, '报告.xlsx'), (5, '~RF999.tmp')],
+             drive, ev2, cache2, pend2, snaps, evd, dom)   # 新临时 + 原文件让位
+rio((d / '~RF123.tmp').rename, d / '报告.xlsx')
+handle_batch([(4, '~RF123.tmp'), (5, '报告.xlsx')],
+             drive, ev2, cache2, pend2, snaps, evd, dom)   # 临时顶回原名 → 折叠
+rio((d / '~RF999.tmp').unlink)
+handle_batch([(2, '~RF999.tmp')], drive, ev2, cache2, pend2, snaps, evd, dom)  # 旧文件清理
+print('Office 保存折叠:', [ev_text(e) for e in ev2])
+assert [e[1] for e in ev2] == ['修改', '新增'], [ev_text(e) for e in ev2]
+assert ev2[0][2] == drive + '报告.xlsx' and ev2[0][6] == ('旧内容行1\r\n旧内容行2', '新内容行1\r\n新内容行2\r\n新内容行3')  # write_text 平台换行 \r\n
+snaps.pop(drive + '报告.xlsx', None)
+rio((d / '报告.xlsx').unlink)
 d.rmdir()
 
 # —— 扩展功能逻辑层 ——

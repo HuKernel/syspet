@@ -965,17 +965,38 @@ def push_event(events, ts, tag, path, old, new, open_path, diff=None):
     log.info('%s %s  %s → %s', tag, path, size(old), size(new))
 
 
-def handle_batch(batch, drive, events, cache, pending, snapshots=None):
+def _drop_events(events, *pairs):
+    """从事件流移除已被折叠的中间步骤卡片（tag, 路径串）"""
+    for tag, p in pairs:
+        for i, e in enumerate(events):
+            if e[1] == tag and e[2] == p:
+                del events[i]
+                break
+
+
+def handle_batch(batch, drive, events, cache, pending, snapshots=None,
+                 evicted=None, doomed=None):
     """一批通知 [(action, 盘内相对路径)] → 事件；cache 记录路径上次大小作'前快照'；
     snapshots 跨批持久，记小文本文件上次内容（点击修改事件可看前后对比）；
-    pending 跨批暂存改名旧名，等新名到达配对（内核洪峰时 4/5 会被拆开送达）"""
+    pending 跨批暂存改名旧名，等新名到达配对（内核洪峰时 4/5 会被拆开送达）；
+    evicted/doomed 服务 Office 替换式保存的折叠（见 a==5 分支）"""
     if snapshots is None:
         snapshots = {}
+    if evicted is None:   # {原路径: (让位临时名, 旧大小, 旧快照, 时刻)}
+        evicted = {}
+    if doomed is None:    # {待清理临时名: 时刻}——折叠后旧文件的删除不再单独报
+        doomed = {}
     ts = time.strftime(TS_FMT)
     now = time.time()
     for old in [k for k, t in pending.items() if now - t > 10]:
         del pending[old]  # 等不到新名的孤立旧名，放弃
+    for k in [k for k, (_, _, _, t) in evicted.items() if now - t > 10] + \
+             [k for k, t in doomed.items() if now - t > 10]:
+        evicted.pop(k, None)
+        doomed.pop(k, None)
     for a, name in batch:
+        if name.startswith('~$'):  # Office 锁文件（开/关文档时增删）：纯噪音
+            continue
         path = drive + name
         diff = None
         if a == 4:                     # 改名旧名先到，暂存等配对
@@ -985,12 +1006,31 @@ def handle_batch(batch, drive, events, cache, pending, snapshots=None):
             old_path = next(iter(pending), None)
             if old_path is not None:
                 del pending[old_path]
+                ev = evicted.get(path)
+                if ev and now - ev[3] <= 10:
+                    # Office 替换式保存：写临时文件 → 原文件改名让位 → 临时文件
+                    # 顶上原名 → 删旧。净效果 = 原文件被修改，折叠成一条"修改"
+                    # （含前后内容对比），并撤掉已入流的"让位改名/临时新增"卡片
+                    tmp, old_sz, old_snap, _ = ev
+                    evicted.pop(path, None)
+                    new_sz = fsize(path)
+                    after = _snap_update(snapshots, path, new_sz)
+                    if old_snap is not None or after is not None:
+                        diff = (old_snap, after)
+                    push_event(events, ts, '修改', path, old_sz, new_sz, path, diff)
+                    _drop_events(events,
+                                 ('改名', f'{path[len(drive):]} → {tmp[len(drive):]}'),
+                                 ('新增', old_path), ('新增', tmp))
+                    doomed[tmp] = now  # 随后旧文件的删除是内部清理，不报
+                    cache[path] = new_sz
+                    continue
                 old_sz, new_sz = cache.pop(old_path, None), fsize(path)
                 cache[path] = new_sz
                 snap = snapshots.pop(old_path, None)  # 快照随改名迁移
                 after = _snap_update(snapshots, path, new_sz)
                 if after is None and snap is not None:
                     snapshots[path] = snap
+                evicted[old_path] = (path, old_sz, snap, now)  # 让位记录，等顶替
                 push_event(events, ts, '改名',
                            f'{old_path[len(drive):]} → {name}', old_sz, new_sz, path)
                 continue
@@ -1007,6 +1047,10 @@ def handle_batch(batch, drive, events, cache, pending, snapshots=None):
             if before is not None or after is not None:
                 diff = (before, after)
         elif a == 2:
+            if path in doomed:        # 替换保存的旧文件清理：内部步骤不报
+                doomed.pop(path, None)
+                cache.pop(path, None)
+                continue
             old, new = cache.pop(path, None), None
             snapshots.pop(path, None)
         else:
@@ -1019,6 +1063,7 @@ def handle_batch(batch, drive, events, cache, pending, snapshots=None):
 
 def listen_drive(drive, events, cache, snapshots):
     """单盘内核通知监听（阻塞式），盘移除或打开失败则退出，由管理线程重启"""
+    evicted, doomed = {}, {}
     try:
         h = win32file.CreateFileW(
             drive, 0x1,  # FILE_LIST_DIRECTORY，本版 win32file 未收录
@@ -1038,7 +1083,8 @@ def listen_drive(drive, events, cache, snapshots):
                     continue
                 log.warning('%s 监听退出: %s', drive, e)
                 return
-            handle_batch(batch, drive, events, cache, pending, snapshots)
+            handle_batch(batch, drive, events, cache, pending, snapshots,
+                         evicted, doomed)
     finally:
         win32file.CloseHandle(h)  # 退出路径释放目录句柄
 
