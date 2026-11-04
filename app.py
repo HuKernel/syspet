@@ -1,6 +1,9 @@
 """SysPet 玻璃拟态版入口（PySide6 UI + syspet 逻辑层，见 docs/UI-Redesign-Handoff.md）。
 --notify 参数进入通知捕获子进程（无 Qt 依赖）。"""
+from pathlib import Path
+
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 import ctypes
 import sys
 import time
@@ -32,6 +35,10 @@ def main():
     from main_window import MainWindow
     app = QApplication(sys.argv)
     app.setStyleSheet(main_window.QSS)
+    # 应用级窗口图标：设置页等系统对话框左上角显示 SysPet 图标
+    # 打包 onefile 时 ico 在解包目录 _MEIPASS；脚本模式在项目根
+    ico = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'syspet.ico'
+    app.setWindowIcon(QIcon(str(ico)))
     w = MainWindow()
     w.show()
     if '--shot' in sys.argv:  # 自渲染截图（验收用，无需平台屏幕抓取）
