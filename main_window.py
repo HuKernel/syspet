@@ -1047,10 +1047,8 @@ class MainWindow(QWidget):
         self.c_pomo.show()
 
     def _show_net(self):
-        self._popup = InfoPopup(self, '谁在联网 · 外网 TCP 连接（点击关闭）', '扫描中…')
-        self._popup.place_near(self)
-        self._popup.show()
-        popup = self._popup
+        popup = self._open_popup(InfoPopup(self, '谁在联网 · 外网 TCP 连接（点击关闭）',
+                                           '扫描中…'))
 
         def run():
             rows = syspet.net_procs()
@@ -1067,13 +1065,10 @@ class MainWindow(QWidget):
             return
         syspet.toast('磁盘空间报告',
                      '\n'.join(f'{n} {p:.0f}%{pred}' for n, p, pred in rows),
-                     cat='hist')  # 手动触发不门控（用户关了 sys 类通知也照弹）
+                     manual=True)  # 手动触发不门控（用户关了 sys 类通知也照弹）
 
     def _show_hw(self):
-        self._popup = InfoPopup(self, '硬件信息（点击关闭）', '读取中…')
-        self._popup.place_near(self)
-        self._popup.show()
-        popup = self._popup
+        popup = self._open_popup(InfoPopup(self, '硬件信息（点击关闭）', '读取中…'))
 
         def run():
             info = syspet.hw_info()
@@ -1133,12 +1128,18 @@ class MainWindow(QWidget):
         elif kind == 'C盘':
             self._next_disk()
 
+    def _open_popup(self, popup):
+        """换弹窗：先关旧的，防连续点击叠加出一摞"""
+        if self._popup:
+            self._popup.close()
+        self._popup = popup
+        popup.place_near(self)
+        popup.show()
+        return popup
+
     def show_top(self, kind):
         # 无父顶层窗由 Python 引用拥有：局部变量随函数返回被 GC，窗口即销毁（闪没根因）
-        self._popup = TopPopup(self, kind)
-        self._popup.place_near(self)
-        self._popup.show()
-        popup = self._popup
+        popup = self._open_popup(TopPopup(self, kind))
 
         def run():
             rows = syspet.top_procs(kind)
@@ -1182,7 +1183,7 @@ class MainWindow(QWidget):
                  for d in reversed(ds)]
         md, mu = syspet.month_traffic(self._tr['days'])
         lines.append(f"本月　↓{size(md)} ↑{size(mu)}")
-        syspet.toast('流量历史（最近 3 天）', '\n'.join(lines), cat='hist')  # 手动触发不门控
+        syspet.toast('流量历史（最近 3 天）', '\n'.join(lines), manual=True)  # 手动触发不门控
 
     def _show_empty(self):
         it = QListWidgetItem()
@@ -1340,9 +1341,9 @@ class MainWindow(QWidget):
         if sp is None:
             self.g_dio.set_value(None, FG)
             self._hist['磁盘'].append(0)
-        else:  # 200MB/s 满量程画条，文本直读速度
+        else:  # 1GB/s 满量程画条（NVMe 顺序读写不打满），文本直读速度
             mbps = (sp[0] + sp[1]) / 1048576
-            pct = min(100.0, mbps / 2)
+            pct = min(100.0, mbps / 10)
             self.g_dio.set_value(pct, syspet.mood(pct), text=f'{mbps:3.0f}M')
             self._hist['磁盘'].append(pct)
         self._pomo_tick()

@@ -529,7 +529,7 @@ def month_traffic(days):
             sum(d['up'] for d in days if d['date'][:7] == ym))
 
 
-_PRIVATE = ('10.', '192.168.', '127.', '169.254.', '0.0.0.0', '::1', '::')
+_PRIVATE = ('10.', '192.168.', '127.', '169.254.', '0.0.0.0', '::1', 'fe80:')
 
 
 def _is_private(ip):
@@ -705,10 +705,11 @@ _toast = {'ai': True, 'sys': True, 'net': True, 'usb': True, 'rest': True}
 # 按类别的系统通知开关（事件流照常记录，仅控制弹窗）；键：ai/sys/net/usb/rest
 
 
-def toast(title, body, cat='sys'):
+def toast(title, body, cat='sys', manual=False):
     """弹 Windows 原生通知（PowerShell WinRT；后台线程执行防阻塞 UI；
-    无控制台父进程的子进程 stdio 必须显式重定向，否则 PowerShell 挂起）"""
-    if not _toast.get(cat, True):
+    无控制台父进程的子进程 stdio 必须显式重定向，否则 PowerShell 挂起）。
+    manual=True 为用户主动点击触发的报告，不走路由门控（如磁盘报告/流量历史）"""
+    if not manual and not _toast.get(cat, True):
         return
 
     def run():

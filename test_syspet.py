@@ -171,6 +171,8 @@ assert syspet.month_traffic(_days) == (130, 70)
 assert syspet._is_private('192.168.1.1') and syspet._is_private('10.0.0.1')
 assert syspet._is_private('172.20.1.1') and not syspet._is_private('172.32.1.1')
 assert not syspet._is_private('8.8.8.8')
+assert syspet._is_private('fe80::1') and syspet._is_private('::1')
+assert not syspet._is_private('::ffff:8.8.8.8')  # IPv4-mapped IPv6 仍是外网
 _rows = syspet.net_procs()  # 真机冒烟
 assert isinstance(_rows, list) and len(_rows) <= 15 and all(len(r) == 2 for r in _rows)
 
