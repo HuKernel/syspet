@@ -14,7 +14,8 @@ from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QLinearGradient, QPai
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QPlainTextEdit, QPushButton,
-                               QTabWidget, QTextEdit, QVBoxLayout, QWidget)
+                               QTabWidget, QTextEdit, QToolTip, QVBoxLayout,
+                               QWidget)
 
 import syspet
 from syspet import HINT, KEEP, TS_FMT, clip_path, size, speed, split_ext
@@ -250,12 +251,25 @@ class EventCard(QWidget):
             row2.addWidget(sz)
         col.addLayout(row2)
         lay.addLayout(col)
-        # 悬浮显示完整路径：卡片空间有限，clip_path 截断会吃掉后缀/中段
-        self.setToolTip(path if tag in ('通知', '告警')
-                        else f'{ev[5]}\n{size(old)} → {size(new)}')
+        # 悬浮显示完整路径：卡片空间有限，clip_path 截断会吃掉后缀/中段。
+        # 本窗为 Qt.Tool 透明窗，系统 ToolTip 触发链不可靠（实测不产生事件），
+        # 故 enterEvent 里主动 QToolTip.showText
+        self._tip = path if tag in ('通知', '告警') \
+            else f'{ev[5]}\n{size(old)} → {size(new)}'
+        self.setToolTip(self._tip)
+        self._tip_timer = QTimer(self, singleShot=True)
+        self._tip_timer.timeout.connect(
+            lambda: QToolTip.showText(QCursor.pos(), self._tip, self))
         self.setStyleSheet(f'background: {_rgba("#ffffff", 0.055)};'
                            f'border: 1px solid {_rgba("#ffffff", 0.10)};'
                            f'border-radius: 10px;')
+
+    def enterEvent(self, _):
+        self._tip_timer.start(500)
+
+    def leaveEvent(self, _):
+        self._tip_timer.stop()
+        QToolTip.hideText()
 
 
 class HistCanvas(QWidget):
@@ -1207,7 +1221,9 @@ class MainWindow(QWidget):
         it = QListWidgetItem()
         it.setSizeHint(QSize(370, 44))
         self.list.insertItem(0, it)
-        self.list.setItemWidget(it, EventCard(ev))
+        card = EventCard(ev)
+        self.list.setItemWidget(it, card)
+        it.setToolTip(card._tip)  # 卡片间隙区域的兜底
         if self.list.count() > KEEP:
             row = self.list.count() - 1
             w = self.list.itemWidget(self.list.item(row))  # 先取引用
