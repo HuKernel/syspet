@@ -151,9 +151,9 @@ class Gauge(QWidget):
         self.clicked.emit(self.kind)
         e.accept()
 
-    def set_value(self, pct, color, unit='%'):
+    def set_value(self, pct, color, unit='%', text=None):
         self.bar.set_value(pct, color)
-        self.val.setText('—' if pct is None else f'{pct:3.0f}{unit}')
+        self.val.setText('—' if pct is None else (text or f'{pct:3.0f}{unit}'))
 
     def set_name(self, name):
         self._name.setText(name)
@@ -308,13 +308,13 @@ class TopPopup(QWidget):
                            f'border-radius: 12px;')
         QTimer.singleShot(8000, self.close)
 
-    def fill(self, rows):
-        """Top5 采样结果回填（弹窗可能已自动关闭）"""
+    def fill(self, rows, unit='%'):
+        """Top5 采样结果回填（弹窗可能已自动关闭）；unit 兼容磁盘 MB/s"""
         if not self.isVisible() or not rows:
             return
         self.placeholder.hide()
         for name, v in rows:
-            r = QLabel(f'{name[:24]:24s} {v:5.1f}%')
+            r = QLabel(f'{name[:24]:24s} {v:5.1f}{unit}')
             r.setFont(_mono(9))
             lay = self.layout()
             lay.insertWidget(lay.count() - 1, r)
@@ -329,6 +329,43 @@ class TopPopup(QWidget):
             y2 = main.y() - self.height() - 6
         x2 = min(main.x(), main.screen().geometry().width() - self.width())
         self.move(max(0, x2), max(0, y2))
+
+
+class InfoPopup(QWidget):
+    """置顶信息弹窗（谁在联网/硬件信息等）：行列表回填，点击关闭"""
+
+    def __init__(self, main, title, loading='加载中…'):
+        super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(4)
+        head = QLabel(title)
+        head.setFont(_text(9, True))
+        head.setStyleSheet(f'color: {ACC1};')
+        lay.addWidget(head)
+        self.placeholder = QLabel(loading)
+        self.placeholder.setStyleSheet(f'color: #b0b0b5;')
+        lay.addWidget(self.placeholder)
+        lay.addStretch(1)
+        self.setStyleSheet(f'background: #14161d; border: 1px solid {_rgba("#ffffff", 0.14)};'
+                           f'border-radius: 12px;')
+        QTimer.singleShot(15000, self.close)
+
+    def fill(self, lines, mono=True):
+        if not self.isVisible():
+            return
+        self.placeholder.hide()
+        for line in lines:
+            r = QLabel(line)
+            r.setFont(_mono(9) if mono else _text(9))
+            self.layout().insertWidget(self.layout().count() - 1, r)
+
+    def mousePressEvent(self, _):
+        self.close()
+
+    def place_near(self, main):
+        TopPopup.place_near(self, main)
 
 
 class SettingsDialog(QDialog):
@@ -671,8 +708,13 @@ class MainWindow(QWidget):
         self._ai_ver = -1
         self._ai_rows = []
         self.gpu_state = {'gpu': (None, None, None)}
-        self._hist = {'CPU': deque(maxlen=3600), '内存': deque(maxlen=3600)}
+        self._hist = {'CPU': deque(maxlen=3600), '内存': deque(maxlen=3600),
+                      '磁盘': deque(maxlen=3600)}
         self._io, self._t = None, time.time()
+        self._dio = None  # disk_io_counters 上次采样（读写速度用）
+        self._pomo_end = 0  # 番茄钟截止时刻（0=未开）；休息期复用并配 _pomo_rest
+        self._pomo_rest = False
+        self._day_mark = ''  # 每日维护（磁盘占用记录+SMART）标记
         self._pdh = syspet.cpu_utility_init()
         self._armed = set()
         self._net_last, self._net_ck = None, 0
@@ -745,6 +787,11 @@ class MainWindow(QWidget):
         self.c_net = QLabel('—')
         self.c_net.setFont(_mono(8))
         self.c_net.setFixedWidth(23 * 7)  # Consolas 8pt ≈ 7px/字符
+        self.c_pomo = QLabel('')  # 番茄钟倒计时（未开时隐藏）
+        self.c_pomo.setFont(_mono(8))
+        self.c_pomo.setStyleSheet(f'color: {ACC1};')
+        self.c_pomo.setFixedWidth(8 * 7)
+        self.c_pomo.hide()
         self.c_day = ClickableLabel('Σ —')
         self.c_day.setFont(_mono(8))
         self.c_day.setStyleSheet(f'color: {DIM};')
@@ -753,7 +800,8 @@ class MainWindow(QWidget):
         self.c_clk.setFont(_mono(8))
         self.c_clk.setStyleSheet(f'color: {DIM};')
         self.c_clk.setFixedWidth(8 * 7)
-        for w in (self.c_clk, self._dot(), self.c_day, self._dot(), self.c_net):
+        for w in (self.c_clk, self._dot(), self.c_pomo, self.c_day,
+                  self._dot(), self.c_net):
             hl.addWidget(w, alignment=Qt.AlignRight)
         self.c_day.clicked.connect(self._show_traffic_hist)
         root.addWidget(header)
@@ -769,12 +817,14 @@ class MainWindow(QWidget):
         self.g_vram = Gauge('显存', '显存')
         self.g_dsk = Gauge('C盘', 'C盘')
         self.g_gput = Gauge('温度', '温度')
+        self.g_dio = Gauge('读写', '磁盘')
         for i, g in enumerate((self.g_cpu, self.g_gpu, self.g_mem,
-                               self.g_vram, self.g_dsk, self.g_gput)):
+                               self.g_vram, self.g_dsk, self.g_gput, self.g_dio)):
             grid.addWidget(g, i // 2, i % 2)
         self.g_cpu.clicked.connect(self._on_gauge)
         self.g_mem.clicked.connect(self._on_gauge)
         self.g_dsk.clicked.connect(self._on_gauge)
+        self.g_dio.clicked.connect(self._on_gauge)
         root.addWidget(grid_host)
 
         self.ai_host = QWidget()
@@ -952,8 +1002,102 @@ class MainWindow(QWidget):
         act.setChecked(syspet.autostart_enabled())
         act.triggered.connect(lambda: self._toggle_autostart(act))
         m.addSeparator()
+        if self._pomo_end > time.time():
+            rem = int(self._pomo_end - time.time())
+            m.addAction(f'🍅 番茄钟 · {rem // 60:02d}:{rem % 60:02d}（点击取消）',
+                        self._pomo_cancel)
+        else:
+            m.addAction('🍅 番茄钟 · 专注 25 分钟', self._pomo_start)
+        m.addAction('谁在联网…', self._show_net)
+        m.addAction('磁盘空间报告', self._show_disk_report)
+        m.addAction('硬件信息', self._show_hw)
+        m.addSeparator()
         m.addAction('退出', self._quit)
         m.exec(self.cursor().pos())
+
+    # ———————— 扩展功能：番茄钟 / 网络 / 磁盘报告 / 硬件 ————————
+
+    def _pomo_start(self):
+        self._pomo_end, self._pomo_rest = time.time() + 25 * 60, False
+        self._flash('番茄钟已开始：专注 25 分钟')
+
+    def _pomo_cancel(self):
+        self._pomo_end, self._pomo_rest = 0, False
+        self.c_pomo.hide()
+        self._flash('番茄钟已取消')
+
+    def _pomo_tick(self):
+        """番茄钟推进（tick 每秒调）：到点通知并自动接 5 分钟休息"""
+        if not self._pomo_end:
+            return
+        rem = self._pomo_end - time.time()
+        if rem <= 0:
+            if self._pomo_rest:
+                msg, self._pomo_end, self._pomo_rest = '休息结束，继续冲刺！', 0, False
+                self.c_pomo.hide()
+            else:
+                msg = '番茄钟完成！起来活动 5 分钟'
+                self._pomo_end, self._pomo_rest = time.time() + 5 * 60, True
+            syspet.push_event(self.events, time.strftime(TS_FMT), '通知',
+                              msg, None, None, '')
+            syspet.toast('SysPet 番茄钟', msg, cat='rest')
+            return
+        tag = '☕' if self._pomo_rest else '🍅'
+        self.c_pomo.setText(f'{tag}{int(rem) // 60:02d}:{int(rem) % 60:02d}')
+        self.c_pomo.show()
+
+    def _show_net(self):
+        self._popup = InfoPopup(self, '谁在联网 · 外网 TCP 连接（点击关闭）', '扫描中…')
+        self._popup.place_near(self)
+        self._popup.show()
+        popup = self._popup
+
+        def run():
+            rows = syspet.net_procs()
+            lines = [f'{name[:20]:20s} {remote}' for name, remote in rows]
+            if not lines:
+                lines = ['当前无外网连接']
+            self.bridge.call(lambda: popup.fill(lines))
+        threading.Thread(target=run, daemon=True).start()
+
+    def _show_disk_report(self):
+        rows = syspet.disk_forecast()
+        if not rows:
+            self._flash('无法读取磁盘信息')
+            return
+        syspet.toast('磁盘空间报告',
+                     '\n'.join(f'{n} {p:.0f}%{pred}' for n, p, pred in rows),
+                     cat='sys')
+
+    def _show_hw(self):
+        self._popup = InfoPopup(self, '硬件信息（点击关闭）', '读取中…')
+        self._popup.place_near(self)
+        self._popup.show()
+        popup = self._popup
+
+        def run():
+            info = syspet.hw_info()
+            lines = [f'{k:　<3s} {v}' for k, v in info.items()]
+            self.bridge.call(lambda: popup.fill(lines, mono=False))
+        threading.Thread(target=run, daemon=True).start()
+
+    def _daily_maint(self):
+        """每日一次（含启动）：后台记录磁盘占用 + SMART 失败预警"""
+        def run():
+            try:
+                syspet.disk_hist_note()
+            except Exception:
+                pass  # 配置读写失败不影响主流程
+            try:
+                for inst, bad in syspet.smart_check():
+                    if bad:
+                        msg = f'硬盘 SMART 预测失败：{inst[:40]}'
+                        syspet.push_event(self.events, time.strftime(TS_FMT),
+                                          '告警', msg, None, None, '')
+                        syspet.toast('SysPet 磁盘告警', msg, cat='sys')
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
 
     def _toggle_autostart(self, act):
         if not syspet.set_autostart(act.isChecked()):
@@ -984,7 +1128,7 @@ class MainWindow(QWidget):
 
     # ———————— 仪表交互 ————————
     def _on_gauge(self, kind):
-        if kind in ('CPU', '内存'):
+        if kind in ('CPU', '内存', '磁盘'):
             self.show_top(kind)
         elif kind == 'C盘':
             self._next_disk()
@@ -998,7 +1142,8 @@ class MainWindow(QWidget):
 
         def run():
             rows = syspet.top_procs(kind)
-            self.bridge.call(lambda: popup.fill(rows))
+            unit = 'MB/s' if kind == '磁盘' else '%'
+            self.bridge.call(lambda: popup.fill(rows, unit))
         threading.Thread(target=run, daemon=True).start()
 
     def _next_disk(self):
@@ -1029,15 +1174,14 @@ class MainWindow(QWidget):
 
     # ———————— 事件流 ————————
     def _show_traffic_hist(self):
-        """点击 Σ：toast 弹最近 3 天流量"""
+        """点击 Σ：toast 弹最近 3 天 + 本月累计"""
         ds = self._tr['days'][-4:-1]
-        if not ds:
-            self._flash('暂无历史流量记录')
-            return
         year = time.strftime('%Y')
         lines = [f"{(d['date'] + ' ') if d['date'][:4] != year else d['date'][5:] + ' '}"
                  f"↓{size(d['down'])} ↑{size(d['up'])}"
                  for d in reversed(ds)]
+        md, mu = syspet.month_traffic(self._tr['days'])
+        lines.append(f"本月　↓{size(md)} ↑{size(mu)}")
         syspet.toast('流量历史（最近 3 天）', '\n'.join(lines), cat='hist')  # 手动触发不门控
 
     def _show_empty(self):
@@ -1171,6 +1315,9 @@ class MainWindow(QWidget):
         today = time.strftime('%Y-%m-%d')
         if self._tr['days'][-1]['date'] != today:
             self._tr = syspet.traffic_load()
+        if self._day_mark != today:  # 每日维护：磁盘占用记录 + SMART 预警
+            self._day_mark = today
+            self._daily_maint()
         cur = self._tr['days'][-1]
         d, u = syspet.traffic_delta(self._io, io)  # 累计用精确字节增量
         cur['down'] += d
@@ -1184,6 +1331,21 @@ class MainWindow(QWidget):
         self.g_cpu.set_value(cpu, syspet.mood(cpu))
         self.g_mem.set_value(mem, syspet.mood(mem))
         self.g_dsk.set_value(dsk, syspet.mood(dsk))
+        try:
+            dio = syspet.psutil.disk_io_counters()
+        except OSError:
+            dio = None
+        sp = syspet.disk_io_speed(self._dio, dio, dt)
+        self._dio = dio
+        if sp is None:
+            self.g_dio.set_value(None, FG)
+            self._hist['磁盘'].append(0)
+        else:  # 200MB/s 满量程画条，文本直读速度
+            mbps = (sp[0] + sp[1]) / 1048576
+            pct = min(100.0, mbps / 2)
+            self.g_dio.set_value(pct, syspet.mood(pct), text=f'{mbps:3.0f}M')
+            self._hist['磁盘'].append(pct)
+        self._pomo_tick()
         gu, gv, gt = self.gpu_state['gpu']
         self.g_gpu.set_value(gu, syspet.mood(gu) if gu is not None else FG)
         self.g_vram.set_value(gv, syspet.mood(gv) if gv is not None else FG)

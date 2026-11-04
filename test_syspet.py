@@ -155,4 +155,31 @@ assert ev[4][6] is None  # 不存在文件的修改（其他.tmp）无对比数�
 assert snaps == {drive + '孤.txt': '9'}, snaps
 rio((d / '孤.txt').unlink)
 d.rmdir()
+
+# —— 扩展功能逻辑层 ——
+IOc = collections.namedtuple('dio', 'read_bytes write_bytes read_count write_count')
+assert syspet.disk_io_speed(None, IOc(1, 1, 0, 0), 1) is None            # 首采无基线
+assert syspet.disk_io_speed(IOc(100, 50, 0, 0), IOc(300, 150, 0, 0), 2) == (100.0, 50.0)
+assert syspet.disk_io_speed(IOc(300, 150, 0, 0), IOc(100, 50, 0, 0), 1) == (0, 0)  # 回绕按 0
+
+ym = time.strftime('%Y-%m')
+_days = [{'date': f'{ym}-01', 'down': 100, 'up': 50},
+         {'date': f'{ym}-02', 'down': 30, 'up': 20},
+         {'date': '2020-01-01', 'down': 999, 'up': 999}]  # 非本月不计
+assert syspet.month_traffic(_days) == (130, 70)
+
+assert syspet._is_private('192.168.1.1') and syspet._is_private('10.0.0.1')
+assert syspet._is_private('172.20.1.1') and not syspet._is_private('172.32.1.1')
+assert not syspet._is_private('8.8.8.8')
+_rows = syspet.net_procs()  # 真机冒烟
+assert isinstance(_rows, list) and len(_rows) <= 15 and all(len(r) == 2 for r in _rows)
+
+_fc = syspet.disk_forecast()
+assert _fc and all(len(r) == 3 and 0 <= r[1] <= 100 for r in _fc), _fc
+_info = syspet.hw_info()
+assert '内存' in _info and '系统' in _info, _info
+assert all(len(r) == 2 for r in syspet.smart_check())
+_tp = syspet.top_procs('磁盘')  # 两段采样 ~0.4s
+assert len(_tp) <= 5 and all(v >= 0 for _, v in _tp), _tp
+print('扩展功能逻辑层测试通过')
 print('ok')

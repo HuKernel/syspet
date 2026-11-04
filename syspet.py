@@ -473,7 +473,7 @@ def pos_load():
 
 
 def top_procs(kind):
-    """Top5 进程 [(名, %)]；CPU 用两段采样（各 ~0.4s）"""
+    """Top5 进程 [(名, 值)]；CPU 用两段采样（各 ~0.4s）；磁盘为两段采样的 MB/s"""
     procs = list(psutil.process_iter())
     if kind == 'CPU':
         for p in procs:
@@ -482,6 +482,25 @@ def top_procs(kind):
             except psutil.Error:
                 pass
         time.sleep(0.4)
+    elif kind == '磁盘':
+        def _io_sum(p):
+            try:
+                io = p.io_counters()
+                return io.read_bytes + io.write_bytes
+            except (psutil.Error, AttributeError):
+                return None
+        first = {p.pid: _io_sum(p) for p in procs}
+        time.sleep(0.4)
+        rows = []
+        for p in procs:
+            base, now = first.get(p.pid), _io_sum(p)
+            if base is not None and now is not None and now > base:
+                try:
+                    rows.append((p.name(), (now - base) / 0.4 / 1048576))
+                except psutil.Error:
+                    pass
+        rows.sort(key=lambda r: r[1], reverse=True)
+        return rows[:5]
     rows = []
     for p in procs:
         try:
@@ -491,6 +510,170 @@ def top_procs(kind):
             pass
     rows.sort(key=lambda r: r[1], reverse=True)
     return rows[:5]
+
+
+# ———————— 扩展功能逻辑层（仪表/网络/预测/硬件） ————————
+
+def disk_io_speed(last, now, dt):
+    """相邻两次 disk_io_counters 的 (读 B/s, 写 B/s)；不可用/首采返回 None"""
+    if last is None or now is None or dt <= 0:
+        return None
+    return (max(0, (now.read_bytes - last.read_bytes) / dt),
+            max(0, (now.write_bytes - last.write_bytes) / dt))
+
+
+def month_traffic(days):
+    """流量天数组中本月的 (↓, ↑) 字节汇总"""
+    ym = time.strftime('%Y-%m')
+    return (sum(d['down'] for d in days if d['date'][:7] == ym),
+            sum(d['up'] for d in days if d['date'][:7] == ym))
+
+
+_PRIVATE = ('10.', '192.168.', '127.', '169.254.', '0.0.0.0', '::1', '::')
+
+
+def _is_private(ip):
+    """内网/回环地址（含 172.16-31 段）"""
+    if ip.startswith('172.'):
+        try:
+            return 16 <= int(ip.split('.')[1]) <= 31
+        except (IndexError, ValueError):
+            return True
+    return any(ip.startswith(p) for p in _PRIVATE)
+
+
+def net_procs():
+    """外网 TCP 连接 [(进程, 远程 ip:port)]，最多 15 行（按进程排序）"""
+    rows = []
+    for c in psutil.net_connections(kind='inet'):
+        if c.status != psutil.CONN_ESTABLISHED or not c.raddr:
+            continue
+        if _is_private(c.raddr.ip):
+            continue
+        try:
+            name = psutil.Process(c.pid).name()
+        except (psutil.Error, TypeError):
+            name = '未知'
+        rows.append((name, f'{c.raddr.ip}:{c.raddr.port}'))
+    rows.sort()
+    return rows[:15]
+
+
+def disk_hist_note():
+    """每日记录各盘已用量到配置（幂等：同日同盘覆盖），供满盘预测"""
+    try:
+        cfg = json.loads(CFG_AI.read_text('utf-8'))
+    except (OSError, ValueError):
+        cfg = {}
+    hist = cfg.get('disk_hist', {})
+    today = time.strftime('%Y-%m-%d')
+    for d in drives():
+        try:
+            hist.setdefault(d[0], {})[today] = shutil.disk_usage(d).used
+        except OSError:
+            pass
+    cfg_update(disk_hist=hist)
+    return hist
+
+
+def disk_forecast():
+    """[(盘, 占用%, 预测文本)]：≥2 天占用史且在增时给出'约 N 天后满'（>365 天视为充裕不提）"""
+    try:
+        hist = json.loads(CFG_AI.read_text('utf-8')).get('disk_hist', {})
+    except (OSError, ValueError):
+        hist = {}
+    out = []
+    for d in drives():
+        try:
+            du = shutil.disk_usage(d)
+            pct = 100 * du.used / du.total
+        except OSError:
+            continue
+        pred = ''
+        pts = sorted(hist.get(d[0], {}).items())
+        if len(pts) >= 2:
+            (d0, u0), (d1, u1) = pts[0], pts[-1]
+            span = max(1, (datetime.datetime.strptime(d1, '%Y-%m-%d')
+                           - datetime.datetime.strptime(d0, '%Y-%m-%d')).days)
+            grow = (u1 - u0) / span  # B/天
+            if grow > 0:
+                left = (du.total - du.used) / grow
+                if left <= 365:
+                    pred = f' · 约 {left:.0f} 天后满'
+        out.append((f'{d[0]}盘', pct, pred))
+    return out
+
+
+def smart_check():
+    """硬盘 SMART 失败预测 [(盘实例, 是否预测失败)]；无数据/不支持返回 []"""
+    try:
+        out = subprocess.run(
+            ['wmic', '/namespace:\\\\root\\wmi', 'path',
+             'MSStorageDriver_FailurePredictStatus',
+             'get', 'InstanceName,PredictFailure', '/format:csv'],
+            capture_output=True, text=True, timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    lines = [l.strip() for l in out.splitlines() if l.strip()]
+    heads = [l for l in lines if l.lower().startswith('node,')]
+    if not heads:
+        return []
+    cols = heads[0].split(',')
+    try:
+        i_inst, i_pf = cols.index('InstanceName'), cols.index('PredictFailure')
+    except ValueError:
+        return []
+    rows = []
+    for l in lines[lines.index(heads[0]) + 1:]:
+        parts = l.split(',')
+        if len(parts) > max(i_inst, i_pf):
+            rows.append((parts[i_inst], parts[i_pf].strip().upper() == 'TRUE'))
+    return rows
+
+
+def hw_info():
+    """硬件信息（全只读）：CPU/内存/GPU/主板/系统；任一项拿不到就跳过"""
+    out = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r'HARDWARE\DESCRIPTION\System\CentralProcessor\0') as k:
+            out['CPU'] = winreg.QueryValueEx(k, 'ProcessorNameBuffer')[0].strip()
+    except OSError:
+        pass
+    vm = psutil.virtual_memory()
+    out['内存'] = f'{vm.total / 1073741824:.1f} GB（可用 {vm.available / 1073741824:.1f}）'
+    try:
+        o = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name,driver_version', '--format=csv,noheader'],
+            capture_output=True, text=True, timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW).stdout.strip()
+        if o:
+            out['GPU'] = o.splitlines()[0].replace(',', ' ·')
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if 'GPU' not in out:  # 无 N 卡：注册表显示适配器兜底（0000 为主卡）
+        base = (r'SYSTEM\CurrentControlSet\Control\Class'
+                r'\{4d36e968-e325-11ce-bfc1-08002be10318}')
+        for sub in ('0000', '0001'):
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                    base + '\\' + sub) as k:
+                    out['GPU'] = winreg.QueryValueEx(k, 'Device Description')[0]
+                    break
+            except OSError:
+                continue
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r'HARDWARE\DESCRIPTION\System\BIOS') as k:
+            mk = winreg.QueryValueEx(k, 'SystemManufacturer')[0].strip()
+            md = winreg.QueryValueEx(k, 'SystemProductName')[0].strip()
+            out['主板'] = f'{mk} {md}'.strip()
+    except OSError:
+        pass
+    wv = sys.getwindowsversion()
+    out['系统'] = f'Windows {wv.major}.{wv.minor}.{wv.build}（{"64" if sys.maxsize > 2**32 else "32"}位）'
+    return out
 
 
 RELEASE_URL = 'https://github.com/HuKernel/syspet/releases/latest'
