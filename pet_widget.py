@@ -149,13 +149,18 @@ class PetCat(QWidget):
                     p.drawEllipse(QPointF(x0, y + 4.5), 2.6, 3.0)
 
     # —— 交互 ——
+    def _begin_drag(self, gp):
+        """脱嵌开始拖拽。gp=鼠标全局坐标。必须在 setParent 前做坐标映射：
+        child 态的 self.x() 是父内坐标，直接当全局用会把猫瞬移到屏幕左侧"""
+        top_left = self.mapToGlobal(QPoint(0, 0))  # 抓出前的真实全局左上角
+        self.dragging = True
+        self.press_pos = (gp.x(), gp.y())
+        self.drag_off = (gp.x() - top_left.x(), gp.y() - top_left.y())
+        self._pop_out(top_left)  # 原位脱嵌，不跳变
+
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            gp = e.globalPosition().toPoint()
-            self.dragging = True
-            self.press_pos = (gp.x(), gp.y())
-            self.drag_off = (gp.x() - self.x(), gp.y() - self.y())
-            self._pop_out(gp - QPoint(*self.drag_off))  # 原位抓出，不跳变
+            self._begin_drag(e.globalPosition().toPoint())
             e.accept()
 
     def mouseMoveEvent(self, e):
