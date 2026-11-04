@@ -39,6 +39,7 @@ class PetCat(QWidget):
         self._drops = ((11.0, 14.0, 0.28, 0.0), (42.5, 18.0, 0.20, 0.45),
                        (7.5, 19.0, 0.34, 0.75))
         self._raised_s = -1
+        self._custom_anchor = None  # None=默认窗底；放置后记忆落点
         self._dock_in()
         self.show()
 
@@ -46,9 +47,13 @@ class PetCat(QWidget):
         self.timer.timeout.connect(self._tick)
         self.timer.start(30)
 
-    # —— 窗内锚点（父内坐标）：底部中央偏左，趴窗底沿 ——
+    # —— 窗内锚点（父内坐标）：默认=窗底中央（每次动态算，布局后才正确）；
+    # 用户在窗内放手后固化为自定义锚（记忆放置位置） ——
     def _dock_pos(self):
-        return (int(self.main.width() * 0.40), self.main.height() - SZ - 2)
+        if self._custom_anchor is None:
+            return (int(self.main.width() * 0.40),
+                    self.main.height() - SZ - 2)
+        return self._custom_anchor
 
     def _docked(self):
         return self.parent() is self.main
@@ -179,6 +184,13 @@ class PetCat(QWidget):
         if not self.dragging:
             return
         self.dragging = False
+        # 落点规则：猫中心在窗内 → 趴在放手处；甩出窗外 → 弹回上次趴的位置
+        cx, cy = self.x() + SZ // 2, self.y() + SZ // 2
+        m = self.main.geometry()
+        if m.contains(cx, cy):
+            lx = max(0, min(cx - SZ // 2 - m.x(), self.main.width() - SZ))
+            ly = max(0, min(cy - SZ // 2 - m.y(), self.main.height() - SZ))
+            self._custom_anchor = (lx, ly)
         moved = abs(gp.x() - self.press_pos[0]) + abs(gp.y() - self.press_pos[1])
         if moved < 6:  # 点击：表情 + 跳一下（弹簧弹回逻辑接管）
             self.state = random.choice(('happy', 'wow', 'blink', 'happy'))
