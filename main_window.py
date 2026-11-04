@@ -1067,7 +1067,7 @@ class MainWindow(QWidget):
             return
         syspet.toast('磁盘空间报告',
                      '\n'.join(f'{n} {p:.0f}%{pred}' for n, p, pred in rows),
-                     cat='sys')
+                     cat='hist')  # 手动触发不门控（用户关了 sys 类通知也照弹）
 
     def _show_hw(self):
         self._popup = InfoPopup(self, '硬件信息（点击关闭）', '读取中…')
